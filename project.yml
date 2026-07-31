@@ -8,8 +8,6 @@ settings:
     SWIFT_VERSION: "5"
     MACOSX_DEPLOYMENT_TARGET: "13.0"
     ARCHS: arm64
-    CODE_SIGN_IDENTITY: "-"
-    CODE_SIGN_STYLE: Manual
 targets:
   mac_tool_pro:
     type: application
@@ -17,14 +15,14 @@ targets:
     sources:
       - path: Sources/App
       - path: Sources/Shared
-    info:
-      path: Resources/App-Info.plist
     entitlements:
       path: Resources/App.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro
         PRODUCT_NAME: mac_tool_pro
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/App-Info.plist
     dependencies:
       - target: FinderSyncExt
         embed: true
@@ -34,11 +32,11 @@ targets:
     sources:
       - path: Sources/FinderSyncExt
       - path: Sources/Shared
-    info:
-      path: Resources/Ext-Info.plist
     entitlements:
       path: Resources/Ext.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro.FinderSyncExt
         PRODUCT_NAME: FinderSyncExt
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Ext-Info.plist
