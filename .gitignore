@@ -1,0 +1,16 @@
+# Build output
+build/
+
+# Xcode (generated via xcodegen)
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+*.swp
