@@ -1,5 +1,6 @@
 # Build output
 build/
+dist/
 
 # Xcode (generated via xcodegen)
 *.xcodeproj/
