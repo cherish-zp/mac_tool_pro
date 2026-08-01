@@ -17,6 +17,7 @@ targets:
       - path: Sources/Shared
     entitlements:
       path: Resources/App.entitlements
+      properties: {}
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro
@@ -34,9 +35,23 @@ targets:
       - path: Sources/Shared
     entitlements:
       path: Resources/Ext.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro.FinderSyncExt
         PRODUCT_NAME: FinderSyncExt
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: Resources/Ext-Info.plist
+  mac_tool_proTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/mac_tool_proTests
+      - path: Sources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
