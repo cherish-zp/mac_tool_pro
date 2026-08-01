@@ -15,6 +15,7 @@ targets:
     sources:
       - path: Sources/App
       - path: Sources/Shared
+      - path: Sources/Modules
     entitlements:
       path: Resources/App.entitlements
       properties: {}
@@ -49,6 +50,7 @@ targets:
     sources:
       - path: Tests/mac_tool_proTests
       - path: Sources/Shared
+      - path: Sources/Modules
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro.tests

@@ -1,0 +1,26 @@
+import Foundation
+
+/// Carbon 修饰键位常量（值与 HIToolbox 的 cmdKey/shiftKey/optionKey/controlKey 一致）。
+/// 自定义常量避免在测试目标里 import Carbon。
+public enum ModifierKey {
+    public static let command: UInt32 = 0x0100
+    public static let shift: UInt32 = 0x0200
+    public static let option: UInt32 = 0x0800
+    public static let control: UInt32 = 0x1000
+    /// 只保留四个主修饰键，丢弃 alphaLock/fnKey 等位。
+    public static let mask: UInt32 = command | shift | option | control
+}
+
+/// 全局热键：Carbon 虚拟键码 + 规范化修饰键。Codable 便于持久化与快捷键设置。
+public struct Hotkey: Codable, Equatable, Hashable {
+    public let keyCode: UInt32
+    public let modifiers: UInt32
+
+    public init(keyCode: UInt32, modifiers: UInt32 = 0) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers & ModifierKey.mask
+    }
+
+    /// F1 = kVK_F1(122)，截图默认快捷键。
+    public static let f1 = Hotkey(keyCode: 122)
+}

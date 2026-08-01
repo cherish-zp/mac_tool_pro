@@ -1,0 +1,69 @@
+import XCTest
+import CoreGraphics
+
+/// TDD: 截图标注数据模型 - 添加/删除/撤销/清空标注，支持矩形/箭头/文字/马赛克。
+final class AnnotationModelTests: XCTestCase {
+
+    func test_addAndCount() {
+        let model = AnnotationModel()
+        XCTAssertEqual(model.count, 0)
+        model.add(makeAnnotation(.rectangle))
+        model.add(makeAnnotation(.arrow))
+        XCTAssertEqual(model.count, 2)
+    }
+
+    func test_undo_removesLast() {
+        let model = AnnotationModel()
+        let a1 = makeAnnotation(.rectangle)
+        let a2 = makeAnnotation(.arrow)
+        model.add(a1)
+        model.add(a2)
+        let removed = model.undo()
+        XCTAssertEqual(removed?.id, a2.id)
+        XCTAssertEqual(model.count, 1)
+    }
+
+    func test_undo_emptyReturnsNil() {
+        let model = AnnotationModel()
+        XCTAssertNil(model.undo())
+    }
+
+    func test_removeAt() {
+        let model = AnnotationModel()
+        model.add(makeAnnotation(.rectangle))
+        model.add(makeAnnotation(.arrow))
+        model.remove(at: 0)
+        XCTAssertEqual(model.count, 1)
+        XCTAssertEqual(model.annotations.first?.type, .arrow)
+    }
+
+    func test_clear() {
+        let model = AnnotationModel()
+        model.add(makeAnnotation(.rectangle))
+        model.add(makeAnnotation(.text))
+        model.clear()
+        XCTAssertEqual(model.count, 0)
+    }
+
+    func test_codableRoundTrip() throws {
+        let model = AnnotationModel()
+        model.add(makeAnnotation(.rectangle))
+        model.add(makeAnnotation(.text, text: "你好"))
+        let data = try JSONEncoder().encode(model)
+        let back = try JSONDecoder().decode(AnnotationModel.self, from: data)
+        XCTAssertEqual(back.count, 2)
+        XCTAssertEqual(back.annotations[1].text, "你好")
+    }
+
+    // MARK: - Helpers
+
+    private func makeAnnotation(_ type: AnnotationType, text: String? = nil) -> Annotation {
+        Annotation(
+            type: type,
+            points: [CGPoint(x: 10, y: 10), CGPoint(x: 100, y: 100)],
+            text: text,
+            color: .red,
+            strokeWidth: 3
+        )
+    }
+}
