@@ -9,6 +9,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager!
     private var moduleRegistry: AppModuleRegistry!
     private var screenshotModule: ScreenshotModule!
+    private var globalKeyMonitor: Any?
+    private var eventTapListener: CGEventTapHotkeyListener?
+    private var screenshotInProgress = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -19,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image?.isTemplate = true
 
         setupAppModules()
+        setupGlobalKeyMonitor()
         rebuildMenu()
         startRequestPolling()
     }
@@ -31,6 +35,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         screenshotModule = ScreenshotModule()
         moduleRegistry.register(screenshotModule)
+    }
+
+    /// 热键监听：三层兜底确保 F1 能触发截图。
+    /// 1. CGEventTap（主）：可消费事件、阻止系统功能键拦截，需辅助功能权限
+    /// 2. NSEvent 全局监控（备）：Carbon 不触发时兜底
+    /// 3. Carbon RegisterEventHotKey（已在 AppModuleRegistry 注册）
+    private func setupGlobalKeyMonitor() {
+        // 检查并请求辅助功能权限（CGEventTap 和全局键盘监控需要）
+        let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary)
+        DiagLog.write("Accessibility trusted: \(trusted)")
+
+        // 1. CGEventTap 主方案
+        let tapListener = CGEventTapHotkeyListener()
+        tapListener.start(keyCode: 122) { [weak self] in
+            self?.triggerScreenshot()
+        }
+        eventTapListener = tapListener
+
+        // 2. NSEvent 全局监控备选方案
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == 122 { // F1
+                DiagLog.write("NSEvent global monitor: F1 detected")
+                self?.triggerScreenshot()
+            }
+        }
+        DiagLog.write("Hotkey listeners installed (CGEventTap + NSEvent monitor)")
     }
 
     private func rebuildMenu() {
@@ -63,9 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
-        // 手动触发截图
+        // 手动触发截图 + 诊断
         menu.addItem(.separator())
         menu.addItem(withTitle: "截图 (F1)", action: #selector(triggerScreenshot), keyEquivalent: "")
+        menu.addItem(withTitle: "查看热键日志", action: #selector(showHotkeyLog), keyEquivalent: "")
 
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出 mac_tool_pro", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -95,6 +126,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func triggerScreenshot() {
+        guard !screenshotInProgress else { return }
+        screenshotInProgress = true
         screenshotModule.perform()
+        // 重置标志（截图完成后允许再次触发）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.screenshotInProgress = false
+        }
+    }
+
+    @objc private func showHotkeyLog() {
+        NSWorkspace.shared.open(DiagLog.logURL)
     }
 }

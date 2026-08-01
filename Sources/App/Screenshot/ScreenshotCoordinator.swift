@@ -13,11 +13,13 @@ final class ScreenshotCoordinator {
     private var selectionRect: CGRect?
 
     func start() {
+        DiagLog.write("ScreenshotCoordinator.start()")
         // 1. 请求屏幕录制权限
         captureService.requestPermission()
 
         // 2. 捕获所有屏幕画面（在显示覆盖层之前）
         let displays = captureService.captureAllDisplays()
+        DiagLog.write("Captured \(displays.count) display(s)")
         guard !displays.isEmpty else { return }
 
         // 3. 为每个屏幕创建覆盖层窗口

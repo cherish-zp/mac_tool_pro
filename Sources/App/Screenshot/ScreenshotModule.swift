@@ -10,6 +10,7 @@ final class ScreenshotModule: AppModule {
     private var coordinator: ScreenshotCoordinator?
 
     func perform() {
+        DiagLog.write("ScreenshotModule.perform() called")
         let coord = ScreenshotCoordinator()
         self.coordinator = coord
         coord.start()
