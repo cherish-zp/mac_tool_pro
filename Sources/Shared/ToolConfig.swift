@@ -10,7 +10,7 @@ public enum ToolConfig {
         }
     }
 
-    static var directoryURL: URL {
+    public static var directoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let dir = base.appendingPathComponent("mac_tool_pro", isDirectory: true)
@@ -18,7 +18,7 @@ public enum ToolConfig {
         return dir
     }
 
-    static var fileURL: URL {
+    public static var fileURL: URL {
         directoryURL.appendingPathComponent("config.json")
     }
 

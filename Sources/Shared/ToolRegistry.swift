@@ -7,7 +7,7 @@ public final class ToolRegistry {
 
     public let tools: [Tool]
 
-    public init(tools: [Tool] = [CopyPathTool()]) {
+    public init(tools: [Tool] = [CopyPathTool(), CreateFileTool(fileCreator: RequestFileCreator())]) {
         self.tools = tools
     }
 

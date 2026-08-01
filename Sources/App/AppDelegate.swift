@@ -2,6 +2,8 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
+    private var requestProcessor: RequestProcessor?
+    private var pollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -11,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         statusItem.button?.image?.isTemplate = true
         rebuildMenu()
+        startRequestPolling()
     }
 
     private func rebuildMenu() {
@@ -31,6 +34,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出 mac_tool_pro", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
+    }
+
+    /// 轮询扩展容器里的"新建文件"请求队列，由本非沙盒进程真正创建文件。
+    private func startRequestPolling() {
+        requestProcessor = RequestProcessor(queueDirectory: IPCConfig.extensionRequestDirectory())
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.requestProcessor?.processAll()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
     }
 
     @objc private func toggle(_ sender: NSMenuItem) {
