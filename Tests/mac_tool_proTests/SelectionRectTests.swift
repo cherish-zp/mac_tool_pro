@@ -98,4 +98,21 @@ final class SelectionRectTests: XCTestCase {
         let abs = SelectionRect.toAbsolute(CGPoint(x: 30, y: 70), origin: .zero)
         XCTAssertEqual(abs, CGPoint(x: 30, y: 70))
     }
+
+    // MARK: - 像素缩放往返（显示尺寸 = 选区点尺寸）
+
+    func test_scaleToPixels_roundTrip_displaySizeEqualsSelection() {
+        // 选区 300x400 点，2x Retina -> 像素 600x800
+        // 裁剪后 NSImage 的 size 应为选区点尺寸(300x400)，而非像素尺寸(600x800)
+        let sel = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let viewSize = CGSize(width: 1920, height: 1080)
+        let imageSize = CGSize(width: 3840, height: 2160)
+        let pixels = SelectionRect.scaleToPixels(sel, imageSize: imageSize, viewSize: viewSize)
+        XCTAssertEqual(pixels.width, 600, accuracy: 0.001)
+        XCTAssertEqual(pixels.height, 800, accuracy: 0.001)
+        // 反推显示尺寸：像素 / 缩放比 = 点尺寸 = 选区尺寸
+        let scaleX = imageSize.width / viewSize.width
+        let displaySize = CGSize(width: pixels.width / scaleX, height: pixels.height / scaleX)
+        XCTAssertEqual(displaySize, sel.size)
+    }
 }

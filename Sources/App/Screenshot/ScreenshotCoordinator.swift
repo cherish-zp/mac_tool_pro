@@ -152,7 +152,9 @@ final class ScreenshotCoordinator {
         } else {
             finalImage = cropped
         }
-        return NSImage(cgImage: finalImage, size: NSSize(width: finalImage.width, height: finalImage.height))
+        // NSImage size 用选区点尺寸(sel.size)，而非像素尺寸(finalImage.width/height)，
+        // 否则贴图窗口按像素尺寸创建会放大变形。
+        return NSImage(cgImage: finalImage, size: sel.size)
     }
 
     private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow) -> CGImage? {
@@ -214,6 +216,10 @@ final class ScreenshotCoordinator {
         guard let image = renderFinalImage(), let sel = selectionRect else { return }
         let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
         let pin = PinWindow(image: image, at: pinPoint)
+        pin.onClose = { [weak self, weak pin] in
+            guard let pin = pin else { return }
+            self?.pinWindows.removeAll { $0 === pin }
+        }
         pin.makeKeyAndOrderFront(nil)
         pinWindows.append(pin)
     }
@@ -292,6 +298,10 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
                 if let image = image {
                     let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
                     let pin = PinWindow(image: image, at: pinPoint)
+                    pin.onClose = { [weak self, weak pin] in
+                        guard let pin = pin else { return }
+                        self?.pinWindows.removeAll { $0 === pin }
+                    }
                     pin.makeKeyAndOrderFront(nil)
                     self?.pinWindows.append(pin)
                 }
