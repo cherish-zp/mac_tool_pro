@@ -22,22 +22,37 @@ final class ScreenshotCoordinator {
         DiagLog.write("Captured \(displays.count) display(s)")
         guard !displays.isEmpty else { return }
 
-        // 3. 为每个屏幕创建覆盖层窗口
-        overlayWindows = displays.compactMap { display in
-            guard let screen = screenMatching(displayID: display.displayID, frame: display.frame) else { return nil }
+        // 3. 临时切换为常规应用以获得焦点（Agent 应用默认无法显示置顶窗口）
+        NSApp.setActivationPolicy(.regular)
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        // 4. 为每个屏幕创建覆盖层窗口
+        overlayWindows = displays.compactMap { display -> ScreenshotOverlayWindow? in
+            DiagLog.write("Display: id=\(display.displayID) frame=\(display.frame) imageSize=\(display.image.width)x\(display.image.height)")
+            guard let screen = screenMatching(displayID: display.displayID, frame: display.frame) else {
+                DiagLog.write("screenMatching returned nil for display \(display.displayID)")
+                return nil
+            }
+            DiagLog.write("Matched screen: \(screen.frame)")
             let window = ScreenshotOverlayWindow(screen: screen, capturedImage: display.image)
-            let view = window.overlayView
+            let view = window.overlayView!
             view.onSelectionComplete = { [weak self, weak window] rect in
                 self?.handleSelectionComplete(rect: rect, window: window)
             }
             view.onCancel = { [weak self] in self?.cancel() }
-            window.makeKeyAndOrderFront(nil)
-            window.overlayView.window?.makeFirstResponder(view)
+            // Agent 应用必须用 orderFrontRegardless 才能显示窗口
+            window.orderFrontRegardless()
+            window.makeKey()
+            window.overlayView!.window?.makeFirstResponder(view)
+            DiagLog.write("Window ordered front: frame=\(window.frame) level=\(window.level.rawValue)")
             return window
         }
 
-        // 4. 激活 App 以接收键盘事件
-        NSApp.activate(ignoringOtherApps: true)
+        DiagLog.write("Created \(overlayWindows.count) overlay window(s)")
     }
 
     // MARK: 选区完成
@@ -46,9 +61,9 @@ final class ScreenshotCoordinator {
         guard let window = window else { return }
         activeOverlay = window
         selectionRect = rect
-        window.overlayView.isEditMode = true
-        window.overlayView.currentTool = .rectangle
-        window.overlayView.needsDisplay = true
+        window.overlayView!.isEditMode = true
+        window.overlayView!.currentTool = .rectangle
+        window.overlayView!.needsDisplay = true
 
         // 显示工具条（定位在选区下方）
         let toolbar = ScreenshotToolbar()
@@ -79,7 +94,7 @@ final class ScreenshotCoordinator {
         guard let overlay = activeOverlay,
               let sel = selectionRect else { return nil }
 
-        let image = overlay.overlayView.capturedImage
+        let image = overlay.overlayView!.capturedImage
         // 选区在视图坐标系（翻转）中的位置 -> CGImage 坐标系一致（都是左上原点）
         let cropRect = CGRect(
             x: sel.origin.x,
@@ -92,7 +107,7 @@ final class ScreenshotCoordinator {
 
         // 合成标注
         let finalImage: CGImage
-        if overlay.overlayView.annotations.count > 0 || overlay.overlayView.drawingAnnotation != nil {
+        if overlay.overlayView!.annotations.count > 0 || overlay.overlayView!.drawingAnnotation != nil {
             finalImage = compositeAnnotations(on: cropped, from: overlay, selectionOrigin: sel.origin) ?? cropped
         } else {
             finalImage = cropped
@@ -122,7 +137,7 @@ final class ScreenshotCoordinator {
         ctx.scaleBy(x: 1, y: -1)
         ctx.translateBy(x: 0, y: -CGFloat(height))
 
-        let view = overlay.overlayView
+        let view = overlay.overlayView!
         // 借用视图的标注绘制逻辑：直接调用 NSGraphicsContext
         let nsContext = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.current = nsContext
@@ -182,9 +197,13 @@ final class ScreenshotCoordinator {
         toolbar = nil
         activeOverlay = nil
         selectionRect = nil
+        // 恢复为 Agent 应用（无 Dock 图标）
+        NSApp.setActivationPolicy(.accessory)
+        DiagLog.write("Screenshot finished, restored accessory policy")
     }
 
     private func cancel() {
+        DiagLog.write("Screenshot cancelled")
         finish()
     }
 
@@ -204,11 +223,11 @@ final class ScreenshotCoordinator {
 extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
 
     func toolbarDidSelect(tool: AnnotationType?) {
-        activeOverlay?.overlayView.currentTool = tool
+        activeOverlay?.overlayView!.currentTool = tool
     }
 
     func toolbarDidSelectColor(_ color: AnnotationColor) {
-        activeOverlay?.overlayView.currentColor = color
+        activeOverlay?.overlayView!.currentColor = color
     }
 
     func toolbarDidCopy() {

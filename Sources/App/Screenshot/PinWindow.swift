@@ -32,12 +32,9 @@ final class PinWindow: NSWindow {
         contentView?.addGestureRecognizer(closeGesture)
     }
 
-    @available(*, unavailable)
-    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing bufferingType: NSWindow.BackingStoreType, defer flag: Bool) {
-        fatalError()
-    }
 
     @objc private func closeOnDouble(_ sender: NSClickGestureRecognizer) {
         orderOut(nil)
     }
+
 }

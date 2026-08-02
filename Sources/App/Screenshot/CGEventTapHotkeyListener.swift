@@ -10,6 +10,7 @@ final class CGEventTapHotkeyListener {
     private var runLoopSource: CFRunLoopSource?
     private var targetKeyCode: CGKeyCode = 0
     private var handler: (() -> Void)?
+    private var hasLoggedAnyKey = false
 
     /// 启动事件监听。targetKeyCode 为目标虚拟键码（F1=122）。
     func start(keyCode: CGKeyCode, handler: @escaping () -> Void) {
@@ -24,14 +25,19 @@ final class CGEventTapHotkeyListener {
 
             if type == .keyDown {
                 let code = event.getIntegerValueField(.keyboardEventKeycode)
+                // 首次收到任意按键时记录一次，确认 tap 在工作
+                if !listener.hasLoggedAnyKey {
+                    listener.hasLoggedAnyKey = true
+                    DiagLog.write("CGEventTap: first keyDown received, keyCode=\(code)")
+                }
                 if code == Int64(listener.targetKeyCode) {
-                    DiagLog.write("CGEventTap: keyCode=\(code) matched, triggering handler")
+                    DiagLog.write("CGEventTap: keyCode=\(code) matched F1, triggering handler")
                     listener.handler?()
-                    return nil // 消费事件，阻止系统默认行为
+                    return nil
                 }
             }
-            // 事件 tap 被禁用（如权限变化）时重新启用
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                DiagLog.write("CGEventTap: was disabled (type=\(type.rawValue)), re-enabling")
                 if let tap = listener.eventTap {
                     CGEvent.tapEnable(tap: tap, enable: true)
                 }
@@ -47,7 +53,7 @@ final class CGEventTapHotkeyListener {
             callback: callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            DiagLog.write("CGEventTap: tapCreate FAILED - 需要「辅助功能」权限")
+            DiagLog.write("CGEventTap: tapCreate FAILED")
             return
         }
 
@@ -56,6 +62,8 @@ final class CGEventTapHotkeyListener {
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        let enabled = CGEvent.tapIsEnabled(tap: tap)
+        DiagLog.write("CGEventTap: tapIsEnabled=\(enabled)")
     }
 
     func stop() {

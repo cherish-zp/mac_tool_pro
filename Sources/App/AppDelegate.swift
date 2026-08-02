@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenshotModule: ScreenshotModule!
     private var globalKeyMonitor: Any?
     private var eventTapListener: CGEventTapHotkeyListener?
+    private var permissionTimer: Timer?
     private var screenshotInProgress = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image?.isTemplate = true
 
         setupAppModules()
+        
+        // 调试用：监听分布式通知触发截图（可从命令行触发）
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(triggerScreenshot),
+            name: NSNotification.Name("com.zp.mac-tool-pro.trigger-screenshot"), object: nil
+        )
         setupGlobalKeyMonitor()
         rebuildMenu()
         startRequestPolling()
@@ -43,17 +50,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 3. Carbon RegisterEventHotKey（已在 AppModuleRegistry 注册）
     private func setupGlobalKeyMonitor() {
         // 检查并请求辅助功能权限（CGEventTap 和全局键盘监控需要）
-        let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary)
+        let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
         DiagLog.write("Accessibility trusted: \(trusted)")
 
-        // 1. CGEventTap 主方案
-        let tapListener = CGEventTapHotkeyListener()
-        tapListener.start(keyCode: 122) { [weak self] in
-            self?.triggerScreenshot()
-        }
-        eventTapListener = tapListener
+        tryStartEventTap()
 
-        // 2. NSEvent 全局监控备选方案
+        // NSEvent 全局监控备选方案
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 122 { // F1
                 DiagLog.write("NSEvent global monitor: F1 detected")
@@ -61,6 +63,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         DiagLog.write("Hotkey listeners installed (CGEventTap + NSEvent monitor)")
+
+        // 如果权限未授予，启动定时器等待用户授权后自动重建 CGEventTap
+        if !trusted {
+            startPermissionRecoveryTimer()
+        }
+    }
+
+    /// 尝试创建 CGEventTap，成功返回 true。
+    @discardableResult
+    private func tryStartEventTap() -> Bool {
+        let tapListener = CGEventTapHotkeyListener()
+        tapListener.start(keyCode: 122) { [weak self] in
+            self?.triggerScreenshot()
+        }
+        // start() 内部会记录成功/失败日志
+        eventTapListener = tapListener
+        return AXIsProcessTrusted()
+    }
+
+    /// 定时检查辅助功能权限，授予后自动重建 CGEventTap。
+    private func startPermissionRecoveryTimer() {
+        DiagLog.write("Starting permission recovery timer (waiting for Accessibility)")
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            if AXIsProcessTrusted() {
+                DiagLog.write("Accessibility permission granted! Rebuilding CGEventTap")
+                timer.invalidate()
+                self.permissionTimer = nil
+                self.tryStartEventTap()
+            }
+        }
     }
 
     private func rebuildMenu() {

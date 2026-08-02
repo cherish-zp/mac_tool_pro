@@ -35,10 +35,6 @@ final class ScreenshotToolbar: NSWindow {
         buildUI()
     }
 
-    @available(*, unavailable)
-    override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing bufferingType: NSWindow.BackingStoreType, defer flag: Bool) {
-        fatalError()
-    }
 
     private func buildUI() {
         let container = NSView(frame: contentView!.bounds)
@@ -171,4 +167,5 @@ final class ScreenshotToolbar: NSWindow {
         case .black: return .black
         }
     }
+
 }

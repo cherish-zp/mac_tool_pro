@@ -40,7 +40,11 @@ final class ScreenshotOverlayView: NSView {
     // MARK: 绘制
 
     override func draw(_ dirtyRect: NSRect) {
-        let ctx = NSGraphicsContext.current!.cgContext
+        DiagLog.write("OverlayView.draw() bounds=\(bounds) hasSelection=\(selectionRect != nil) editMode=\(isEditMode)")
+        guard let ctx = NSGraphicsContext.current?.cgContext else {
+            DiagLog.write("OverlayView.draw: NO graphics context!")
+            return
+        }
         // 1. 绘制捕获的画面
         ctx.saveGState()
         ctx.draw(capturedImage, in: bounds)
