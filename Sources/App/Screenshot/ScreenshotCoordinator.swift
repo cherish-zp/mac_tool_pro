@@ -1,7 +1,7 @@
 import AppKit
 import CoreGraphics
 
-/// 截图协调器：串联「捕获画面 → 全屏覆盖层选区 → 工具条编辑 → 复制/保存/贴图」全流程。
+/// 截图协调器：串联「捕获画面 -> 全屏覆盖层选区 -> 工具条编辑 -> 复制/保存/贴图」全流程。
 final class ScreenshotCoordinator {
 
     private let captureService = ScreenCaptureService()
@@ -11,18 +11,26 @@ final class ScreenshotCoordinator {
     private let config = ScreenshotConfig()
     private var activeOverlay: ScreenshotOverlayWindow?
     private var selectionRect: CGRect?
+    private var escMonitor: Any?
+
+    /// 截图会话结束时回调（用于重置 ScreenshotSession 状态）。
+    var onFinished: (() -> Void)?
 
     func start() {
         DiagLog.write("ScreenshotCoordinator.start()")
+
+        // 0. 先清理可能残留的旧覆盖层（防止叠加变黑）
+        cleanupExistingOverlays()
+
         // 1. 请求屏幕录制权限
         captureService.requestPermission()
 
         // 2. 捕获所有屏幕画面（在显示覆盖层之前）
         let displays = captureService.captureAllDisplays()
         DiagLog.write("Captured \(displays.count) display(s)")
-        guard !displays.isEmpty else { return }
+        guard !displays.isEmpty else { finish(); return }
 
-        // 3. 临时切换为常规应用以获得焦点（Agent 应用默认无法显示置顶窗口）
+        // 3. 临时切换为常规应用以获得焦点
         NSApp.setActivationPolicy(.regular)
         if #available(macOS 14.0, *) {
             NSApp.activate()
@@ -44,7 +52,6 @@ final class ScreenshotCoordinator {
                 self?.handleSelectionComplete(rect: rect, window: window)
             }
             view.onCancel = { [weak self] in self?.cancel() }
-            // Agent 应用必须用 orderFrontRegardless 才能显示窗口
             window.orderFrontRegardless()
             window.makeKey()
             window.overlayView!.window?.makeFirstResponder(view)
@@ -53,6 +60,35 @@ final class ScreenshotCoordinator {
         }
 
         DiagLog.write("Created \(overlayWindows.count) overlay window(s)")
+
+        // 5. 安装 ESC 本地事件监听（不依赖 first responder）
+        installEscMonitor()
+    }
+
+    /// 清理残留的旧覆盖层窗口（防止多次 F1 导致叠加变黑）。
+    private func cleanupExistingOverlays() {
+        if !overlayWindows.isEmpty {
+            DiagLog.write("Cleaning up \(overlayWindows.count) existing overlay window(s)")
+            for w in overlayWindows { w.orderOut(nil) }
+            overlayWindows.removeAll()
+        }
+        toolbar?.orderOut(nil)
+        toolbar = nil
+        activeOverlay = nil
+        selectionRect = nil
+    }
+
+    /// 安装 ESC 键本地监听：无论 first responder 是谁都能捕获 ESC。
+    private func installEscMonitor() {
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == ScreenshotSession.escKeyCode {
+                DiagLog.write("ESC pressed via local monitor, cancelling screenshot")
+                self?.cancel()
+                return nil // 消费事件
+            }
+            return event
+        }
+        DiagLog.write("ESC local monitor installed")
     }
 
     // MARK: 选区完成
@@ -65,14 +101,12 @@ final class ScreenshotCoordinator {
         window.overlayView!.currentTool = .rectangle
         window.overlayView!.needsDisplay = true
 
-        // 显示工具条（定位在选区下方）
         let toolbar = ScreenshotToolbar()
         toolbar.toolbarDelegate = self
         let tbFrame = toolbar.frame
         let screen = window.screen ?? NSScreen.main!
         var originX = rect.midX - tbFrame.width / 2
         var originY = rect.maxY + 8
-        // 如果超出屏幕底部，放到选区上方
         if originY + tbFrame.height > screen.frame.maxY {
             originY = rect.minY - tbFrame.height - 8
         }
@@ -81,7 +115,6 @@ final class ScreenshotCoordinator {
         toolbar.makeKeyAndOrderFront(nil)
         self.toolbar = toolbar
 
-        // 其他覆盖层窗口关闭（只在选中屏幕操作）
         for w in overlayWindows where w !== window {
             w.orderOut(nil)
         }
@@ -89,64 +122,42 @@ final class ScreenshotCoordinator {
 
     // MARK: 截取最终图片
 
-    /// 将选区内的画面 + 标注合成为最终 NSImage。
     private func renderFinalImage() -> NSImage? {
-        guard let overlay = activeOverlay,
-              let sel = selectionRect else { return nil }
-
+        guard let overlay = activeOverlay, let sel = selectionRect else { return nil }
         let image = overlay.overlayView!.capturedImage
-        // 选区在视图坐标系（翻转）中的位置 -> CGImage 坐标系一致（都是左上原点）
-        let cropRect = CGRect(
-            x: sel.origin.x,
-            y: sel.origin.y,
-            width: sel.width,
-            height: sel.height
-        )
-
+        let cropRect = CGRect(x: sel.origin.x, y: sel.origin.y, width: sel.width, height: sel.height)
         guard let cropped = image.cropping(to: cropRect) else { return nil }
 
-        // 合成标注
         let finalImage: CGImage
         if overlay.overlayView!.annotations.count > 0 || overlay.overlayView!.drawingAnnotation != nil {
             finalImage = compositeAnnotations(on: cropped, from: overlay, selectionOrigin: sel.origin) ?? cropped
         } else {
             finalImage = cropped
         }
-
         return NSImage(cgImage: finalImage, size: NSSize(width: finalImage.width, height: finalImage.height))
     }
 
-    /// 在裁剪后的图片上合成标注（标注坐标是相对于选区原点的）。
     private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow,
                                        selectionOrigin: CGPoint) -> CGImage? {
         let width = cropped.width
         let height = cropped.height
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: width, height: height,
-                                  bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: colorSpace,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-            return nil
-        }
-        // CGContext 原点在左下，而 CGImage 原点在左上 -> 需要翻转
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.translateBy(x: 0, y: CGFloat(height))
         ctx.scaleBy(x: 1, y: -1)
         ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        // 翻转回来绘制标注（标注用左上原点坐标系）
         ctx.scaleBy(x: 1, y: -1)
         ctx.translateBy(x: 0, y: -CGFloat(height))
 
         let view = overlay.overlayView!
-        // 借用视图的标注绘制逻辑：直接调用 NSGraphicsContext
         let nsContext = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.current = nsContext
         for annotation in view.annotations.annotations {
-            // 标注坐标是相对于选区原点的，这里直接用（因为裁剪图就是从选区原点开始的）
             view.drawAnnotationPublic(annotation, in: ctx)
         }
         NSGraphicsContext.current = nil
-
         return ctx.makeImage()
     }
 
@@ -164,45 +175,46 @@ final class ScreenshotCoordinator {
         let dir = config.saveDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        let name = ScreenshotFileNameBuilder.uniqueFileName(
-            date: Date(), config: config, existingNames: Set(existing)
-        )
+        let name = ScreenshotFileNameBuilder.uniqueFileName(date: Date(), config: config, existingNames: Set(existing))
         let url = dir.appendingPathComponent(name)
-        if let tiff = image.tiffRepresentation,
-           let rep = NSBitmapImageRep(data: tiff) {
+        if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
             let data: Data?
             switch config.format {
             case .png: data = rep.representation(using: .png, properties: [:])
             case .jpg: data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.9])
             }
-            if let data = data {
-                try? data.write(to: url)
-            }
+            if let data = data { try? data.write(to: url) }
         }
     }
 
     private func pinToDesktop() {
         guard let image = renderFinalImage(), let sel = selectionRect else { return }
-        // 贴图位置：选区当前位置
         let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
         let pin = PinWindow(image: image, at: pinPoint)
         pin.makeKeyAndOrderFront(nil)
         pinWindows.append(pin)
     }
 
-    private func finish() {
+    /// 结束截图会话：关闭所有覆盖层窗口、工具条，移除事件监听，恢复 App 策略。
+    func finish() {
         for w in overlayWindows { w.orderOut(nil) }
         toolbar?.orderOut(nil)
         overlayWindows.removeAll()
         toolbar = nil
         activeOverlay = nil
         selectionRect = nil
-        // 恢复为 Agent 应用（无 Dock 图标）
+
+        if let escMonitor = escMonitor {
+            NSEvent.removeMonitor(escMonitor)
+            self.escMonitor = nil
+        }
+
         NSApp.setActivationPolicy(.accessory)
         DiagLog.write("Screenshot finished, restored accessory policy")
+        onFinished?()
     }
 
-    private func cancel() {
+    func cancel() {
         DiagLog.write("Screenshot cancelled")
         finish()
     }
@@ -230,34 +242,15 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
         activeOverlay?.overlayView!.currentColor = color
     }
 
-    func toolbarDidCopy() {
-        copyToClipboard()
-        finish()
-    }
-
-    func toolbarDidSave() {
-        saveToFile()
-        finish()
-    }
-
-    func toolbarDidPin() {
-        pinToDesktop()
-        finish()
-    }
-
-    func toolbarDidCancel() {
-        cancel()
-    }
+    func toolbarDidCopy() { copyToClipboard(); finish() }
+    func toolbarDidSave() { saveToFile(); finish() }
+    func toolbarDidPin() { pinToDesktop(); finish() }
+    func toolbarDidCancel() { cancel() }
 
     func toolbarDidScroll() {
-        guard let overlay = activeOverlay,
-              let sel = selectionRect else { return }
-
-        // 获取目标显示器 ID
+        guard let overlay = activeOverlay, let sel = selectionRect else { return }
         let screen = overlay.screen ?? NSScreen.main!
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? CGMainDisplayID()
-
-        // 先隐藏覆盖层，避免截到自身
         for w in overlayWindows { w.orderOut(nil) }
         toolbar?.orderOut(nil)
 
@@ -265,7 +258,6 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
         controller.capture(displayID: displayID, rect: sel) { [weak self] image in
             DispatchQueue.main.async {
                 if let image = image {
-                    // 贴图展示滚动截图结果
                     let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
                     let pin = PinWindow(image: image, at: pinPoint)
                     pin.makeKeyAndOrderFront(nil)

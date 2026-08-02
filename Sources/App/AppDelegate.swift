@@ -12,7 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalKeyMonitor: Any?
     private var eventTapListener: CGEventTapHotkeyListener?
     private var permissionTimer: Timer?
-    private var screenshotInProgress = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -159,13 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func triggerScreenshot() {
-        guard !screenshotInProgress else { return }
-        screenshotInProgress = true
+        // ScreenshotModule 内部用 ScreenshotSession 防止重复触发
         screenshotModule.perform()
-        // 重置标志（截图完成后允许再次触发）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.screenshotInProgress = false
-        }
     }
 
     @objc private func showHotkeyLog() {

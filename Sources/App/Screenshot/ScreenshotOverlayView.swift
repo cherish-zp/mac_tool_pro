@@ -46,7 +46,11 @@ final class ScreenshotOverlayView: NSView {
             return
         }
         // 1. 绘制捕获的画面
+        // isFlipped=true 时 CGContext.draw 会把图片画反（CGImage 原点在左下角，
+        // 翻转上下文导致图片上下颠倒），手动翻转上下文使图片正立显示。
         ctx.saveGState()
+        ctx.translateBy(x: 0, y: bounds.height)
+        ctx.scaleBy(x: 1, y: -1)
         ctx.draw(capturedImage, in: bounds)
         ctx.restoreGState()
 
