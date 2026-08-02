@@ -85,6 +85,10 @@ final class ScreenshotCoordinator {
     private func installEscMonitor() {
         escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == ScreenshotSession.escKeyCode {
+                // 优先取消文字编辑；无文字编辑时才取消整个截图
+                if self?.activeOverlay?.overlayView?.cancelTextEditingIfActive() == true {
+                    return nil
+                }
                 DiagLog.write("ESC pressed via local monitor, cancelling screenshot")
                 self?.cancel()
                 return nil // 消费事件

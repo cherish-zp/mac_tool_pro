@@ -59,6 +59,21 @@ final class AnnotationModelTests: XCTestCase {
 
     // MARK: - 选颜色时默认工具
 
+    // MARK: - 文字标注创建
+
+    func test_textAnnotation_nonEmpty() {
+        let ann = AnnotationModel.textAnnotation(at: CGPoint(x: 50, y: 60), text: "你好世界", color: .red)
+        XCTAssertEqual(ann?.type, .text)
+        XCTAssertEqual(ann?.text, "你好世界")
+        XCTAssertEqual(ann?.color, .red)
+        XCTAssertEqual(ann?.points, [CGPoint(x: 50, y: 60)])
+    }
+
+    func test_textAnnotation_emptyReturnsNil() {
+        XCTAssertNil(AnnotationModel.textAnnotation(at: .zero, text: "", color: .red))
+        XCTAssertNil(AnnotationModel.textAnnotation(at: .zero, text: "   ", color: .red))
+    }
+
     func test_defaultTool_whenColorSelected_noTool() {
         // 未选工具时点颜色，应默认矩形工具，使「点红色即可画红框」
         XCTAssertEqual(AnnotationModel.defaultTool(whenColorSelected: nil), .rectangle)

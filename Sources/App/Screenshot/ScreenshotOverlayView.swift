@@ -19,6 +19,10 @@ final class ScreenshotOverlayView: NSView {
     var currentColor: AnnotationColor = .red
     var strokeWidth: CGFloat = 3
 
+    // 文字标注编辑状态
+    private var activeTextField: NSTextField?
+    private var textEditLocalPoint: CGPoint = .zero
+
     var onSelectionComplete: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
     var onAnnotationsChanged: (() -> Void)?
@@ -228,7 +232,7 @@ final class ScreenshotOverlayView: NSView {
         guard let tool = currentTool, let sel = selectionRect else { return }
         let local = CGPoint(x: point.x - sel.origin.x, y: point.y - sel.origin.y)
         if tool == .text {
-            drawingAnnotation = Annotation(type: .text, points: [local], text: "文字", color: currentColor)
+            startTextEditing(at: point, localPoint: local)
         } else {
             drawingAnnotation = Annotation(type: tool, points: [local, local], color: currentColor, strokeWidth: strokeWidth)
         }
@@ -252,8 +256,75 @@ final class ScreenshotOverlayView: NSView {
         needsDisplay = true
     }
 
+    // MARK: 文字标注编辑
+
+    /// 在点击位置弹出文本输入框，用户输入文字后回车提交。
+    private func startTextEditing(at viewPoint: CGPoint, localPoint: CGPoint) {
+        // 先提交正在编辑的文字（如有），再开始新的输入
+        if activeTextField != nil { commitTextEditing() }
+        textEditLocalPoint = localPoint
+        let tf = NSTextField(frame: NSRect(x: viewPoint.x, y: viewPoint.y, width: 220, height: 28))
+        tf.font = .systemFont(ofSize: 16, weight: .medium)
+        tf.placeholderString = "输入文字，回车确认"
+        tf.target = self
+        tf.action = #selector(textFieldCommitted(_:))
+        tf.delegate = nil
+        tf.stringValue = ""
+        addSubview(tf)
+        window?.makeFirstResponder(tf)
+        activeTextField = tf
+        // 监听失焦（点击别处）自动提交
+        NotificationCenter.default.addObserver(self, selector: #selector(textFieldEndedEditing(_:)),
+                                               name: NSControl.textDidEndEditingNotification, object: tf)
+        DiagLog.write("startTextEditing at local=\(localPoint)")
+    }
+
+    @objc private func textFieldCommitted(_ sender: NSTextField) {
+        commitTextEditing()
+    }
+
+    private func commitTextEditing() {
+        guard let tf = activeTextField else { return }
+        activeTextField = nil  // 先置空，防止 removeFromSuperview 触发 controlTextDidEndEditing 重入
+        NotificationCenter.default.removeObserver(self, name: NSControl.textDidEndEditingNotification, object: tf)
+        let text = tf.stringValue
+        if let ann = AnnotationModel.textAnnotation(at: textEditLocalPoint, text: text, color: currentColor) {
+            annotations.add(ann)
+            onAnnotationsChanged?()
+            DiagLog.write("Text annotation committed: \(text)")
+        }
+        tf.removeFromSuperview()
+        needsDisplay = true
+    }
+
+    private func cancelTextEditing() {
+        if let tf = activeTextField {
+            NotificationCenter.default.removeObserver(self, name: NSControl.textDidEndEditingNotification, object: tf)
+        }
+        activeTextField?.removeFromSuperview()
+        activeTextField = nil
+        needsDisplay = true
+        DiagLog.write("Text editing cancelled")
+    }
+
+    /// ESC 优先取消文字编辑；返回 true 表示已处理（不应再取消截图）。
+    func cancelTextEditingIfActive() -> Bool {
+        if activeTextField != nil {
+            cancelTextEditing()
+            return true
+        }
+        return false
+    }
+
+    // 失焦时自动提交（回车已由 action 提交，guard 防重复）
+    @objc private func textFieldEndedEditing(_ notification: Notification) {
+        if activeTextField != nil { commitTextEditing() }
+    }
+
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == ScreenshotSession.escKeyCode { onCancel?() }
+        if event.keyCode == ScreenshotSession.escKeyCode {
+            if activeTextField != nil { cancelTextEditing() } else { onCancel?() }
+        }
         else if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "z" {
             annotations.undo(); onAnnotationsChanged?(); needsDisplay = true
         }

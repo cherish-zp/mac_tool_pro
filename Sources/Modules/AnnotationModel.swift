@@ -91,4 +91,11 @@ public final class AnnotationModel: Codable {
     public static func defaultTool(whenColorSelected currentTool: AnnotationType?) -> AnnotationType? {
         currentTool ?? .rectangle
     }
+
+    /// 创建文字标注：空文本返回 nil（不创建无效标注）。
+    public static func textAnnotation(at point: CGPoint, text: String, color: AnnotationColor) -> Annotation? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return Annotation(type: .text, points: [point], text: trimmed, color: color)
+    }
 }
