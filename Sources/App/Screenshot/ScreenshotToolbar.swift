@@ -18,16 +18,17 @@ final class ScreenshotToolbar: NSWindow {
     private var toolButtons: [AnnotationType?: NSButton] = [:]
 
     init() {
-        let frame = NSRect(x: 0, y: 0, width: 480, height: 44)
+        let frame = NSRect(x: 0, y: 0, width: 640, height: 44)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        self.level = .screenSaver
+        // 工具条层级高于覆盖层(screenSaver)，防止用户点覆盖层画图时覆盖层置顶遮住工具条
+        self.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
         self.isOpaque = false
-        self.backgroundColor = NSColor(white: 0.12, alpha: 0.92)
+        self.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.16, blue: 0.18, alpha: 0.96)
         self.hasShadow = true
         self.isMovable = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -38,6 +39,7 @@ final class ScreenshotToolbar: NSWindow {
 
     private func buildUI() {
         let container = NSView(frame: contentView!.bounds)
+        container.wantsLayer = true
         container.autoresizingMask = [.width, .height]
         contentView = container
 
@@ -84,7 +86,7 @@ final class ScreenshotToolbar: NSWindow {
 
         // 操作按钮
         x = addActionButton(container, x: x, y: y, title: "滚动", action: #selector(scrollTapped), color: .systemPurple)
-        x = addActionButton(container, x: x + 4, y: y, title: "复制", action: #selector(copyTapped), color: .systemBlue)
+        x = addActionButton(container, x: x + 4, y: y, title: "剪贴板", action: #selector(copyTapped), color: .systemBlue)
         x = addActionButton(container, x: x + 4, y: y, title: "保存", action: #selector(saveTapped), color: .systemGreen)
         x = addActionButton(container, x: x + 4, y: y, title: "贴图", action: #selector(pinTapped), color: .systemOrange)
         x = addActionButton(container, x: x + 4, y: y, title: "取消", action: #selector(cancelTapped), color: .systemRed)
@@ -94,7 +96,11 @@ final class ScreenshotToolbar: NSWindow {
                                tool: AnnotationType?, symbol: String) -> CGFloat {
         let btn = NSButton(frame: NSRect(x: x, y: y, width: size, height: size))
         btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        btn.image?.isTemplate = true
+        btn.contentTintColor = .white
         btn.isBordered = false
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 6
         btn.target = self
         btn.action = #selector(toolSelected(_:))
         btn.tag = toolTag(tool)
@@ -106,14 +112,20 @@ final class ScreenshotToolbar: NSWindow {
 
     private func addActionButton(_ container: NSView, x: CGFloat, y: CGFloat,
                                   title: String, action: Selector, color: NSColor) -> CGFloat {
-        let btn = NSButton(frame: NSRect(x: x, y: y, width: 48, height: 28))
-        btn.title = title
-        btn.font = .systemFont(ofSize: 12, weight: .medium)
-        btn.bezelStyle = .rounded
+        let btn = NSButton(frame: NSRect(x: x, y: y, width: 52, height: 28))
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 6
+        btn.layer?.backgroundColor = color.cgColor
+        btn.isBordered = false
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor.white
+        ]
+        btn.attributedTitle = NSAttributedString(string: title, attributes: attrs)
         btn.target = self
         btn.action = action
         container.addSubview(btn)
-        return x + 48
+        return x + 52
     }
 
     // MARK: 动作
@@ -121,12 +133,14 @@ final class ScreenshotToolbar: NSWindow {
     @objc private func toolSelected(_ sender: NSButton) {
         let tool = toolFromTag(sender.tag)
         selectTool(tool)
+        DiagLog.write("Toolbar.toolSelected: tool=\(String(describing: tool)) tag=\(sender.tag)")
         toolbarDelegate?.toolbarDidSelect(tool: tool)
     }
 
     @objc private func colorSelected(_ sender: NSButton) {
         let idx = sender.tag - 100
         guard AnnotationColor.allCases.indices.contains(idx) else { return }
+        DiagLog.write("Toolbar.colorSelected: idx=\(idx)")
         toolbarDelegate?.toolbarDidSelectColor(AnnotationColor.allCases[idx])
     }
 
@@ -141,8 +155,8 @@ final class ScreenshotToolbar: NSWindow {
     func selectTool(_ tool: AnnotationType?) {
         for (t, btn) in toolButtons {
             btn.layer?.backgroundColor = (t == tool)
-                ? NSColor.white.withAlphaComponent(0.25).cgColor
-                : NSColor.clear.cgColor
+                ? NSColor.white.withAlphaComponent(0.3).cgColor
+                : NSColor.white.withAlphaComponent(0.08).cgColor
         }
     }
 

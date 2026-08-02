@@ -32,11 +32,8 @@ final class ScreenshotCoordinator {
 
         // 3. 临时切换为常规应用以获得焦点
         NSApp.setActivationPolicy(.regular)
-        if #available(macOS 14.0, *) {
-            NSApp.activate()
-        } else {
-            NSApp.activate(ignoringOtherApps: true)
-        }
+        // 强制激活 App（ignoringOtherApps 更可靠，避免首击被窗口激活吞掉）
+        NSApp.activate(ignoringOtherApps: true)
 
         // 4. 为每个屏幕创建覆盖层窗口
         overlayWindows = displays.compactMap { display -> ScreenshotOverlayWindow? in
@@ -47,19 +44,25 @@ final class ScreenshotCoordinator {
             }
             DiagLog.write("Matched screen: \(screen.frame)")
             let window = ScreenshotOverlayWindow(screen: screen, capturedImage: display.image)
+            window.acceptsMouseMovedEvents = true
             let view = window.overlayView!
             view.onSelectionComplete = { [weak self, weak window] rect in
                 self?.handleSelectionComplete(rect: rect, window: window)
             }
             view.onCancel = { [weak self] in self?.cancel() }
             window.orderFrontRegardless()
-            window.makeKey()
-            window.overlayView!.window?.makeFirstResponder(view)
             DiagLog.write("Window ordered front: frame=\(window.frame) level=\(window.level.rawValue)")
             return window
         }
 
         DiagLog.write("Created \(overlayWindows.count) overlay window(s)")
+
+        // 仅将主显示器窗口设为 key，确保键盘事件和首次鼠标点击直达视图
+        if let keyWindow = overlayWindows.first(where: { $0.screen == NSScreen.main }) ?? overlayWindows.first {
+            keyWindow.makeKeyAndOrderFront(nil)
+            keyWindow.makeFirstResponder(keyWindow.overlayView)
+            DiagLog.write("Key window set: frame=\(keyWindow.frame)")
+        }
 
         // 5. 安装 ESC 本地事件监听（不依赖 first responder）
         installEscMonitor()
@@ -98,7 +101,8 @@ final class ScreenshotCoordinator {
         activeOverlay = window
         selectionRect = rect
         window.overlayView!.isEditMode = true
-        window.overlayView!.currentTool = .rectangle
+        // 不自动选标注工具：默认光标模式，用户从工具条选择后才开始画标注
+        window.overlayView!.currentTool = nil
         window.overlayView!.needsDisplay = true
 
         let toolbar = ScreenshotToolbar()
@@ -112,46 +116,58 @@ final class ScreenshotCoordinator {
         }
         originX = max(screen.frame.minX, min(originX, screen.frame.maxX - tbFrame.width))
         toolbar.setFrameOrigin(NSPoint(x: originX, y: originY))
-        toolbar.makeKeyAndOrderFront(nil)
+        // 工具条为 nonactivatingPanel，仅显示不抢占 key；保持覆盖层为 key 窗口，
+        // 否则点击覆盖层时首击被窗口激活吞掉、无法绘制标注
+        toolbar.orderFrontRegardless()
         self.toolbar = toolbar
 
         for w in overlayWindows where w !== window {
             w.orderOut(nil)
         }
+        // 不调用 window.makeKey()：那会把覆盖层提到最前面遮住工具条。
+        // nonactivatingPanel 不抢 key，覆盖层从 start() 起即为 key，可正常接收鼠标事件。
+        DiagLog.write("Edit mode ready: currentTool=nil, toolbar shown above overlay")
     }
 
     // MARK: 截取最终图片
 
     private func renderFinalImage() -> NSImage? {
         guard let overlay = activeOverlay, let sel = selectionRect else { return nil }
-        let image = overlay.overlayView!.capturedImage
-        let cropRect = CGRect(x: sel.origin.x, y: sel.origin.y, width: sel.width, height: sel.height)
+        let view = overlay.overlayView!
+        let image = view.capturedImage
+        // 选区为视图点坐标，图片为像素坐标（Retina 2x），需缩放后裁剪
+        let cropRect = SelectionRect.scaleToPixels(
+            sel, imageSize: CGSize(width: image.width, height: image.height),
+            viewSize: view.bounds.size
+        )
         guard let cropped = image.cropping(to: cropRect) else { return nil }
 
         let finalImage: CGImage
-        if overlay.overlayView!.annotations.count > 0 || overlay.overlayView!.drawingAnnotation != nil {
-            finalImage = compositeAnnotations(on: cropped, from: overlay, selectionOrigin: sel.origin) ?? cropped
+        if view.annotations.count > 0 || view.drawingAnnotation != nil {
+           finalImage = compositeAnnotations(on: cropped, from: overlay) ?? cropped
         } else {
             finalImage = cropped
         }
         return NSImage(cgImage: finalImage, size: NSSize(width: finalImage.width, height: finalImage.height))
     }
 
-    private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow,
-                                       selectionOrigin: CGPoint) -> CGImage? {
+    private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow) -> CGImage? {
         let width = cropped.width
         let height = cropped.height
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: width, height: height,
                                   bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.translateBy(x: 0, y: CGFloat(height))
-        ctx.scaleBy(x: 1, y: -1)
+        // 标准上下文（原点左下），直接绘制裁剪后的图片即正立
         ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
-        ctx.scaleBy(x: 1, y: -1)
-        ctx.translateBy(x: 0, y: -CGFloat(height))
 
+        // 按 Retina 缩放比缩放 CTM，使标注点坐标（视图点）映射到像素
         let view = overlay.overlayView!
+        let viewSize = view.bounds.size
+        let scaleX = viewSize.width > 0 ? CGFloat(view.capturedImage.width) / viewSize.width : 1
+        let scaleY = viewSize.height > 0 ? CGFloat(view.capturedImage.height) / viewSize.height : 1
+        ctx.scaleBy(x: scaleX, y: scaleY)
+
         let nsContext = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.current = nsContext
         for annotation in view.annotations.annotations {
@@ -185,6 +201,9 @@ final class ScreenshotCoordinator {
             }
             if let data = data { try? data.write(to: url) }
         }
+        // 保存后在 Finder 中显示文件，方便用户找到
+        DiagLog.write("Saved screenshot to: \(url.path)")
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     private func pinToDesktop() {
@@ -235,11 +254,20 @@ final class ScreenshotCoordinator {
 extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
 
     func toolbarDidSelect(tool: AnnotationType?) {
+        DiagLog.write("toolbarDidSelect: tool=\(String(describing: tool)) activeOverlay=\(activeOverlay != nil)")
         activeOverlay?.overlayView!.currentTool = tool
     }
 
     func toolbarDidSelectColor(_ color: AnnotationColor) {
+        DiagLog.write("toolbarDidSelectColor: color=\(color) activeOverlay=\(activeOverlay != nil)")
         activeOverlay?.overlayView!.currentColor = color
+        // 未选工具时点颜色，默认矩形工具，使「点红色即可画红框」
+        if let view = activeOverlay?.overlayView, view.currentTool == nil {
+            let tool = AnnotationModel.defaultTool(whenColorSelected: view.currentTool)
+            view.currentTool = tool
+            toolbar?.selectTool(tool)
+            DiagLog.write("toolbarDidSelectColor: auto-selected tool=\(String(describing: tool))")
+        }
     }
 
     func toolbarDidCopy() { copyToClipboard(); finish() }

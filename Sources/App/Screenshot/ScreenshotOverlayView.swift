@@ -2,17 +2,16 @@ import AppKit
 import CoreGraphics
 
 /// 截图覆盖层视图：显示捕获的画面 + 半透明遮罩 + 选区框 + 标注绘制。
-/// 坐标系翻转（isFlipped=true），原点在左上，与 CGImage / 屏幕坐标一致。
+/// 标准坐标系（isFlipped=false，原点左下），鼠标坐标与 CGContext 一致；
+/// 图片直接 ctx.draw 绘制（CGImage 原点左下，标准上下文下正立）。
 final class ScreenshotOverlayView: NSView {
 
     let capturedImage: CGImage
 
-    // MARK: 选区状态
     var selectionStart: CGPoint?
     var selectionRect: CGRect?
     let minimumSelection: CGFloat = 10
 
-    // MARK: 编辑状态
     var isEditMode = false
     let annotations = AnnotationModel()
     var currentTool: AnnotationType?
@@ -20,7 +19,6 @@ final class ScreenshotOverlayView: NSView {
     var currentColor: AnnotationColor = .red
     var strokeWidth: CGFloat = 3
 
-    // MARK: 回调
     var onSelectionComplete: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
     var onAnnotationsChanged: (() -> Void)?
@@ -33,42 +31,36 @@ final class ScreenshotOverlayView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override var isFlipped: Bool { true }
+    override var isFlipped: Bool { false }
     override var acceptsFirstResponder: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
     // MARK: 绘制
 
     override func draw(_ dirtyRect: NSRect) {
-        DiagLog.write("OverlayView.draw() bounds=\(bounds) hasSelection=\(selectionRect != nil) editMode=\(isEditMode)")
-        guard let ctx = NSGraphicsContext.current?.cgContext else {
-            DiagLog.write("OverlayView.draw: NO graphics context!")
-            return
-        }
-        // 1. 绘制捕获的画面
-        // isFlipped=true 时 CGContext.draw 会把图片画反（CGImage 原点在左下角，
-        // 翻转上下文导致图片上下颠倒），手动翻转上下文使图片正立显示。
-        ctx.saveGState()
-        ctx.translateBy(x: 0, y: bounds.height)
-        ctx.scaleBy(x: 1, y: -1)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+
+        // 1. 绘制捕获的画面（标准上下文，CGImage 原点左下，直接绘制即正立）
         ctx.draw(capturedImage, in: bounds)
-        ctx.restoreGState()
 
         if let sel = selectionRect, isEditMode {
-            // 编辑模式：选区内正常显示，外部遮罩
             drawDarkMask(excluding: sel, in: ctx)
             drawSelectionBorder(sel, in: ctx)
-            drawAnnotations(in: ctx, canvasRect: sel)
+            // 标注点为相对选区原点的局部坐标，平移上下文至选区原点使其落到正确位置
+            ctx.saveGState()
+            ctx.translateBy(x: sel.origin.x, y: sel.origin.y)
+            for annotation in annotations.annotations {
+                drawSingleAnnotation(annotation, in: ctx)
+            }
             if let drawing = drawingAnnotation {
                 drawSingleAnnotation(drawing, in: ctx)
             }
+            ctx.restoreGState()
         } else if let sel = selectionRect {
-            // 选区拖拽中
             drawDarkMask(excluding: sel, in: ctx)
             drawSelectionBorder(sel, in: ctx)
             drawSizeLabel(sel)
         } else {
-            // 未开始选区：全屏遮罩
             ctx.setFillColor(NSColor(white: 0, alpha: 0.35).cgColor)
             ctx.fill(bounds)
         }
@@ -76,7 +68,6 @@ final class ScreenshotOverlayView: NSView {
 
     private func drawDarkMask(excluding rect: CGRect, in ctx: CGContext) {
         ctx.setFillColor(NSColor(white: 0, alpha: 0.45).cgColor)
-        // 上、下、左、右四条遮罩带
         ctx.fill(CGRect(x: 0, y: 0, width: bounds.width, height: rect.minY))
         ctx.fill(CGRect(x: 0, y: rect.maxY, width: bounds.width, height: bounds.height - rect.maxY))
         ctx.fill(CGRect(x: 0, y: rect.minY, width: rect.minX, height: rect.height))
@@ -90,7 +81,6 @@ final class ScreenshotOverlayView: NSView {
     }
 
     private func drawSizeLabel(_ rect: CGRect) {
-        let ctx = NSGraphicsContext.current!.cgContext
         let text = "\(Int(rect.width)) × \(Int(rect.height))"
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .medium),
@@ -104,18 +94,13 @@ final class ScreenshotOverlayView: NSView {
             width: size.width, height: size.height
         )
         let bgRect = labelRect.insetBy(dx: -4, dy: -2)
+        let ctx = NSGraphicsContext.current!.cgContext
         ctx.setFillColor(NSColor(white: 0, alpha: 0.7).cgColor)
         ctx.fill(bgRect)
         str.draw(in: labelRect)
     }
 
     // MARK: 标注绘制
-
-    private func drawAnnotations(in ctx: CGContext, canvasRect: CGRect) {
-        for annotation in annotations.annotations {
-            drawSingleAnnotation(annotation, in: ctx)
-        }
-    }
 
     private func drawSingleAnnotation(_ annotation: Annotation, in ctx: CGContext) {
         let color = nsColor(annotation.color)
@@ -144,8 +129,7 @@ final class ScreenshotOverlayView: NSView {
                 .font: NSFont.systemFont(ofSize: 16, weight: .medium),
                 .foregroundColor: color
             ]
-            let str = NSAttributedString(string: text, attributes: attrs)
-            str.draw(at: annotation.points[0])
+            NSAttributedString(string: text, attributes: attrs).draw(at: annotation.points[0])
         case .mosaic:
             guard annotation.points.count >= 2 else { break }
             let rect = SelectionRect.normalize(start: annotation.points[0], end: annotation.points[1])
@@ -155,17 +139,13 @@ final class ScreenshotOverlayView: NSView {
     }
 
     private func drawArrowHead(from start: CGPoint, to end: CGPoint, color: NSColor, in ctx: CGContext) {
-        let dx = end.x - start.x
-        let dy = end.y - start.y
+        let dx = end.x - start.x, dy = end.y - start.y
         let length = sqrt(dx * dx + dy * dy)
         guard length > 0 else { return }
         let angle = atan2(dy, dx)
-        let headLength: CGFloat = 14
-        let headAngle: CGFloat = .pi / 6
-        let p1 = CGPoint(x: end.x - headLength * cos(angle - headAngle),
-                         y: end.y - headLength * sin(angle - headAngle))
-        let p2 = CGPoint(x: end.x - headLength * cos(angle + headAngle),
-                         y: end.y - headLength * sin(angle + headAngle))
+        let hl: CGFloat = 14, ha: CGFloat = .pi / 6
+        let p1 = CGPoint(x: end.x - hl * cos(angle - ha), y: end.y - hl * sin(angle - ha))
+        let p2 = CGPoint(x: end.x - hl * cos(angle + ha), y: end.y - hl * sin(angle + ha))
         ctx.setFillColor(color.cgColor)
         ctx.move(to: end)
         ctx.addLine(to: p1)
@@ -175,60 +155,43 @@ final class ScreenshotOverlayView: NSView {
     }
 
     private func drawMosaic(in rect: CGRect, ctx: CGContext) {
-        let blockSize: CGFloat = 8
-        let originX = rect.origin.x
-        let originY = rect.origin.y
-        let cols = Int(rect.width / blockSize)
-        let rows = Int(rect.height / blockSize)
-        // 从捕获画面中取对应区域做马赛克
-        guard let provider = capturedImage.dataProvider,
-              let data = provider.data else { return }
-        let bytesPerRow = capturedImage.bytesPerRow
-        let bpp = capturedImage.bitsPerPixel / 8
-        let baseAddress = CFDataGetBytePtr(data)
-        let imageWidth = capturedImage.width
-        let imageHeight = capturedImage.height
+        let bs: CGFloat = 8
+        let cols = Int(rect.width / bs), rows = Int(rect.height / bs)
+        guard let provider = capturedImage.dataProvider, let data = provider.data else { return }
+        let bpr = capturedImage.bytesPerRow, bpp = capturedImage.bitsPerPixel / 8
+        let ptr = CFDataGetBytePtr(data)
+        let iw = capturedImage.width, ih = capturedImage.height
+        let viewBounds = bounds
+        let sx = iw > 0 ? CGFloat(iw) / viewBounds.width : 1
+        let sy = ih > 0 ? CGFloat(ih) / viewBounds.height : 1
         for row in 0..<rows {
             for col in 0..<cols {
-                let px = Int(originX) + col * Int(blockSize) + Int(blockSize / 2)
-                let py = Int(originY) + row * Int(blockSize) + Int(blockSize / 2)
-                guard px >= 0, px < imageWidth, py >= 0, py < imageHeight else { continue }
-                let offset = py * bytesPerRow + px * bpp
-                guard offset + bpp <= CFDataGetLength(data) else { continue }
-                let r = baseAddress![offset]
-                let g = baseAddress![offset + 1]
-                let b = baseAddress![offset + 2]
-                ctx.setFillColor(CGColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255,
-                                         blue: CGFloat(b) / 255, alpha: 1))
-                ctx.fill(CGRect(x: originX + CGFloat(col) * blockSize,
-                                y: originY + CGFloat(row) * blockSize,
-                                width: blockSize, height: blockSize))
+                let px = Int((rect.origin.x + CGFloat(col) * bs + bs / 2) * sx)
+                let py = Int((rect.origin.y + CGFloat(row) * bs + bs / 2) * sy)
+                guard px >= 0, px < iw, py >= 0, py < ih else { continue }
+                let off = py * bpr + px * bpp
+                guard off + bpp <= CFDataGetLength(data) else { continue }
+                ctx.setFillColor(CGColor(red: CGFloat(ptr![off]) / 255, green: CGFloat(ptr![off + 1]) / 255,
+                                     blue: CGFloat(ptr![off + 2]) / 255, alpha: 1))
+                ctx.fill(CGRect(x: rect.origin.x + CGFloat(col) * bs, y: rect.origin.y + CGFloat(row) * bs,
+                                width: bs, height: bs))
             }
         }
     }
 
     private func nsColor(_ color: AnnotationColor) -> NSColor {
         switch color {
-        case .red: return .systemRed
-        case .yellow: return .systemYellow
-        case .green: return .systemGreen
-        case .blue: return .systemBlue
-        case .white: return .white
-        case .black: return .black
+        case .red: return .systemRed; case .yellow: return .systemYellow
+        case .green: return .systemGreen; case .blue: return .systemBlue
+        case .white: return .white; case .black: return .black
         }
     }
 
-    // MARK: 鼠标事件
+    // MARK: 鼠标事件（标准坐标系，原点在左下，与 CGContext 一致）
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-
-        if isEditMode {
-            handleEditMouseDown(point)
-            return
-        }
-
-        // 选区开始
+        if isEditMode { handleEditMouseDown(point); return }
         selectionStart = point
         selectionRect = CGRect(origin: point, size: .zero)
         needsDisplay = true
@@ -236,12 +199,7 @@ final class ScreenshotOverlayView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-
-        if isEditMode {
-            handleEditMouseDrag(point)
-            return
-        }
-
+        if isEditMode { handleEditMouseDrag(point); return }
         guard let start = selectionStart else { return }
         var rect = SelectionRect.normalize(start: start, end: point)
         rect = SelectionRect.clamp(rect, to: bounds)
@@ -251,16 +209,10 @@ final class ScreenshotOverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-
-        if isEditMode {
-            handleEditMouseUp(point)
-            return
-        }
-
+        if isEditMode { handleEditMouseUp(point); return }
         guard var rect = selectionRect else { return }
         rect = SelectionRect.enforceMinimumSize(rect, minimum: minimumSelection)
         if !SelectionRect.isValid(rect, minimum: minimumSelection) {
-            // 选区太小 -> 取消
             onCancel?()
             return
         }
@@ -269,16 +221,15 @@ final class ScreenshotOverlayView: NSView {
         onSelectionComplete?(rect)
     }
 
-    // MARK: 编辑模式鼠标处理
+    // MARK: 编辑模式
 
     private func handleEditMouseDown(_ point: CGPoint) {
+        DiagLog.write("handleEditMouseDown: point=\(point) tool=\(String(describing: currentTool)) hasSel=\(selectionRect != nil)")
         guard let tool = currentTool, let sel = selectionRect else { return }
         let local = CGPoint(x: point.x - sel.origin.x, y: point.y - sel.origin.y)
-        switch tool {
-        case .text:
-            // 文字标注：直接创建空标注，后续可弹输入框（MVP 先用占位）
+        if tool == .text {
             drawingAnnotation = Annotation(type: .text, points: [local], text: "文字", color: currentColor)
-        default:
+        } else {
             drawingAnnotation = Annotation(type: tool, points: [local, local], color: currentColor, strokeWidth: strokeWidth)
         }
         needsDisplay = true
@@ -287,36 +238,27 @@ final class ScreenshotOverlayView: NSView {
     private func handleEditMouseDrag(_ point: CGPoint) {
         guard let sel = selectionRect else { return }
         let local = CGPoint(x: point.x - sel.origin.x, y: point.y - sel.origin.y)
-        guard var drawing = drawingAnnotation else { return }
-        if drawing.type != .text {
-            drawing.points[drawing.points.count - 1] = local
-            drawingAnnotation = drawing
-        }
+        guard var d = drawingAnnotation, d.type != .text else { return }
+        d.points[d.points.count - 1] = local
+        drawingAnnotation = d
         needsDisplay = true
     }
 
     private func handleEditMouseUp(_ point: CGPoint) {
-        guard let drawing = drawingAnnotation else { return }
-        annotations.add(drawing)
+        guard let d = drawingAnnotation else { return }
+        annotations.add(d)
         drawingAnnotation = nil
         onAnnotationsChanged?()
         needsDisplay = true
     }
 
-    // MARK: 键盘
-
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { // ESC
-            onCancel?()
-        } else if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "z" {
-            annotations.undo()
-            onAnnotationsChanged?()
-            needsDisplay = true
+        if event.keyCode == ScreenshotSession.escKeyCode { onCancel?() }
+        else if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "z" {
+            annotations.undo(); onAnnotationsChanged?(); needsDisplay = true
         }
     }
 }
-
-// MARK: - 公开标注绘制（供 Coordinator 合成最终图片时调用）
 
 extension ScreenshotOverlayView {
     func drawAnnotationPublic(_ annotation: Annotation, in ctx: CGContext) {

@@ -86,4 +86,9 @@ public final class AnnotationModel: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(annotations, forKey: .annotations)
     }
+
+    /// 选颜色时确定使用的标注工具：未选工具则默认矩形，使「点颜色即可画框」。
+    public static func defaultTool(whenColorSelected currentTool: AnnotationType?) -> AnnotationType? {
+        currentTool ?? .rectangle
+    }
 }

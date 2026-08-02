@@ -57,6 +57,18 @@ final class AnnotationModelTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - 选颜色时默认工具
+
+    func test_defaultTool_whenColorSelected_noTool() {
+        // 未选工具时点颜色，应默认矩形工具，使「点红色即可画红框」
+        XCTAssertEqual(AnnotationModel.defaultTool(whenColorSelected: nil), .rectangle)
+    }
+
+    func test_defaultTool_whenColorSelected_hasTool() {
+        // 已选工具时点颜色，保持原工具不变
+        XCTAssertEqual(AnnotationModel.defaultTool(whenColorSelected: .arrow), .arrow)
+    }
+
     private func makeAnnotation(_ type: AnnotationType, text: String? = nil) -> Annotation {
         Annotation(
             type: type,
