@@ -136,15 +136,22 @@ final class ScreenshotCoordinator {
     // MARK: 截取最终图片
 
     private func renderFinalImage() -> NSImage? {
+        guard let sel = selectionRect, let cg = renderFinalCGImage() else { return nil }
+        return NSImage(cgImage: cg, size: sel.size)
+    }
+
+    /// 渲染最终 CGImage（裁剪 + 标注合成），供贴图直接使用，避免 NSImage 转换丢精度。
+    private func renderFinalCGImage() -> CGImage? {
         guard let overlay = activeOverlay, let sel = selectionRect else { return nil }
         let view = overlay.overlayView!
         let image = view.capturedImage
-        // 选区为视图点坐标，图片为像素坐标（Retina 2x），需缩放后裁剪
-        let cropRect = SelectionRect.scaleToPixels(
+        // 选区为视图点坐标(左下原点)，CGImage 原点在左上，需翻转 y 轴后裁剪
+        let cropRect = SelectionRect.cropRectPixels(selection:
             sel, imageSize: CGSize(width: image.width, height: image.height),
             viewSize: view.bounds.size
         )
-        guard let cropped = image.cropping(to: cropRect) else { return nil }
+      guard let cropped = image.cropping(to: cropRect) else { return nil }
+       DiagLog.write("renderFinalImage: full=\(image.width)x\(image.height) cropRect=\(cropRect) cropped=\(cropped.width)x\(cropped.height) selPts=\(sel.size) annotations=\(view.annotations.count)")
 
         let finalImage: CGImage
         if view.annotations.count > 0 || view.drawingAnnotation != nil {
@@ -152,9 +159,7 @@ final class ScreenshotCoordinator {
         } else {
             finalImage = cropped
         }
-        // NSImage size 用选区点尺寸(sel.size)，而非像素尺寸(finalImage.width/height)，
-        // 否则贴图窗口按像素尺寸创建会放大变形。
-        return NSImage(cgImage: finalImage, size: sel.size)
+        return finalImage
     }
 
     private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow) -> CGImage? {
@@ -213,9 +218,9 @@ final class ScreenshotCoordinator {
     }
 
     private func pinToDesktop() {
-        guard let image = renderFinalImage(), let sel = selectionRect else { return }
+        guard let sel = selectionRect, let cgImage = renderFinalCGImage() else { return }
         let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
-        let pin = PinWindow(image: image, at: pinPoint)
+        let pin = PinWindow(cgImage: cgImage, displaySize: sel.size, at: pinPoint)
         pin.onClose = { [weak self, weak pin] in
             guard let pin = pin else { return }
             self?.pinWindows.removeAll { $0 === pin }
@@ -296,8 +301,11 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
         controller.capture(displayID: displayID, rect: sel) { [weak self] image in
             DispatchQueue.main.async {
                 if let image = image {
+                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                        self?.finish(); return
+                    }
                     let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
-                    let pin = PinWindow(image: image, at: pinPoint)
+                    let pin = PinWindow(cgImage: cgImage, displaySize: image.size, at: pinPoint)
                     pin.onClose = { [weak self, weak pin] in
                         guard let pin = pin else { return }
                         self?.pinWindows.removeAll { $0 === pin }

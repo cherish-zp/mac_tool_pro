@@ -137,4 +137,82 @@ final class SelectionRectTests: XCTestCase {
         )
         XCTAssertEqual(origin, CGPoint(x: 150, y: 180))
     }
+
+    // MARK: - 裁剪保留 Retina 分辨率
+
+    func test_cropRect_preservesRetina2xResolution() {
+        // 2x Retina: 1920x1080 点 -> 3840x2160 像素
+        // 选区 300x400 点 -> 裁剪应为 600x800 像素
+        let viewSize = CGSize(width: 1920, height: 1080)
+        let imageSize = CGSize(width: 3840, height: 2160)
+        let sel = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let cropRect = SelectionRect.scaleToPixels(sel, imageSize: imageSize, viewSize: viewSize)
+        // 裁剪矩形像素尺寸 = 选区点尺寸 * 2
+        XCTAssertEqual(cropRect.width, 600, accuracy: 0.001)
+        XCTAssertEqual(cropRect.height, 800, accuracy: 0.001)
+        // 显示尺寸（点）= 像素 / 2 = 选区尺寸
+        let displaySize = SelectionRect.pointSize(pixelSize: cropRect.size, scaleFactor: 2.0)
+        XCTAssertEqual(displaySize, sel.size)
+        // cgImage 像素 / NSImage size 点 = Retina 缩放比（确保高清）
+        XCTAssertEqual(cropRect.width / displaySize.width, 2.0, accuracy: 0.001)
+        XCTAssertEqual(cropRect.height / displaySize.height, 2.0, accuracy: 0.001)
+    }
+
+    // MARK: - 贴图 CGImage 直接绘制（避免 NSImage 颜色匹配导致偏色）
+
+    func test_cgImageFromNSImage_preservesPixelDimensions() {
+        // NSImage(cgImage:size:) 创建后，提取的 CGImage 像素尺寸应与原始一致
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: 600, height: 800, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let original = ctx.makeImage() else {
+            XCTFail("Cannot create test CGImage")
+            return
+        }
+        let nsImage = NSImage(cgImage: original, size: NSSize(width: 300, height: 400))
+        let extracted = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        XCTAssertNotNil(extracted)
+        XCTAssertEqual(extracted?.width, 600)
+        XCTAssertEqual(extracted?.height, 800)
+    }
+
+    // MARK: - CGImage 裁剪 y 轴翻转（CGImage 原点左上 vs 视图原点左下）
+
+    func test_cropRectPixels_flipsYForTopLeftOrigin() {
+        // 视图 1000x800 点(左下原点)，图片 2000x1600 像素(2x, 左上原点)
+        // 选区 origin(100,200) size(300,400) -> maxY=600
+        // CGImage y = (800 - 600) * 2 = 400（从顶部算）
+        let cropRect = SelectionRect.cropRectPixels(
+            selection: CGRect(x: 100, y: 200, width: 300, height: 400),
+            imageSize: CGSize(width: 2000, height: 1600),
+            viewSize: CGSize(width: 1000, height: 800)
+        )
+        XCTAssertEqual(cropRect.origin.x, 200, accuracy: 0.001)
+        XCTAssertEqual(cropRect.origin.y, 400, accuracy: 0.001)
+        XCTAssertEqual(cropRect.width, 600, accuracy: 0.001)
+        XCTAssertEqual(cropRect.height, 800, accuracy: 0.001)
+    }
+
+    func test_cropRectPixels_selectionAtTopOfScreen() {
+        // 选区在屏幕顶部：origin.y=700 height=100, maxY=800=viewHeight
+        // CGImage y = (800-800)*2 = 0（图片最顶部）
+        let cropRect = SelectionRect.cropRectPixels(
+            selection: CGRect(x: 0, y: 700, width: 1000, height: 100),
+            imageSize: CGSize(width: 2000, height: 1600),
+            viewSize: CGSize(width: 1000, height: 800)
+        )
+        XCTAssertEqual(cropRect.origin.y, 0, accuracy: 0.001)
+    }
+
+    func test_cropRectPixels_selectionAtBottomOfScreen() {
+        // 选区在屏幕底部：origin.y=0 height=100, maxY=100
+        // CGImage y = (800-100)*2 = 1400（图片最底部）
+        let cropRect = SelectionRect.cropRectPixels(
+            selection: CGRect(x: 0, y: 0, width: 1000, height: 100),
+            imageSize: CGSize(width: 2000, height: 1600),
+            viewSize: CGSize(width: 1000, height: 800)
+        )
+        XCTAssertEqual(cropRect.origin.y, 1400, accuracy: 0.001)
+    }
 }

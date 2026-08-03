@@ -59,4 +59,17 @@ public enum SelectionRect {
         CGPoint(x: initialOrigin.x + (currentMouse.x - initialMouse.x),
                 y: initialOrigin.y + (currentMouse.y - initialMouse.y))
     }
+
+    /// 计算 CGImage.cropping(to:) 所需的裁剪矩形。
+    /// CGImage 原点在左上(top-left)，视图坐标原点在左下(bottom-left, isFlipped=false)，
+    /// 需翻转 y 轴：cropY = (viewHeight - selection.maxY) * scaleY。
+    public static func cropRectPixels(selection: CGRect, imageSize: CGSize, viewSize: CGSize) -> CGRect {
+        let scaleX = viewSize.width > 0 ? imageSize.width / viewSize.width : 1
+        let scaleY = viewSize.height > 0 ? imageSize.height / viewSize.height : 1
+        let flippedY = (viewSize.height - selection.maxY) * scaleY
+        return CGRect(x: selection.origin.x * scaleX,
+                      y: flippedY,
+                      width: selection.width * scaleX,
+                      height: selection.height * scaleY)
+    }
 }

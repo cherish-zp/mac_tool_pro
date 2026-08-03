@@ -1,16 +1,15 @@
 import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
-/// 模拟浮光（Snipaste）的贴图功能。拖拽移动、右键或双击关闭。
+/// 直接使用原始 CGImage 绘制，避免 NSImage 转换导致色差/模糊。
 final class PinWindow: NSWindow {
 
     /// 贴图关闭时回调（用于协调器从列表中移除、释放图片）。
     var onClose: (() -> Void)?
 
-    init(image: NSImage, at point: CGPoint) {
-        // image.size 为点尺寸（由 renderFinalImage 设置），窗口按点尺寸创建，不变形
-        let size = image.size
-        let frame = NSRect(x: point.x, y: point.y, width: size.width, height: size.height)
+    init(cgImage: CGImage, displaySize: NSSize, at point: CGPoint) {
+        // displaySize 为点尺寸，窗口按点尺寸创建
+        let frame = NSRect(x: point.x, y: point.y, width: displaySize.width, height: displaySize.height)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .fullSizeContentView],
@@ -24,9 +23,8 @@ final class PinWindow: NSWindow {
         self.isMovable = true
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let imageView = PinImageView(frame: NSRect(origin: .zero, size: size))
-        imageView.image = image
-        imageView.imageScaling = .scaleProportionallyDown
+        let imageView = PinImageView(frame: NSRect(origin: .zero, size: displaySize))
+        imageView.cgImage = cgImage
         imageView.autoresizingMask = [.width, .height]
         contentView = imageView
 
@@ -35,6 +33,8 @@ final class PinWindow: NSWindow {
         let closeItem = menu.addItem(withTitle: "关闭贴图", action: #selector(closePin), keyEquivalent: "")
         closeItem.target = self
         imageView.menu = menu
+
+        DiagLog.write("PinWindow: pts=\(displaySize) pixels=\(cgImage.width)x\(cgImage.height) backingScale=\(self.backingScaleFactor)")
     }
 
     /// 关闭贴图并通知协调器释放资源。
@@ -44,10 +44,11 @@ final class PinWindow: NSWindow {
     }
 }
 
-/// 贴图图片视图：自定义拖拽移动 + 双击关闭。
-/// NSImageView 默认 mouseDownCanMoveWindow=false 且手势识别器会干扰拖拽，
-/// 故自行处理 mouseDown/mouseDragged/mouseUp。
-final class PinImageView: NSImageView {
+/// 贴图视图：直接用 CGContext.draw 绘制原始 CGImage，与覆盖层渲染方式一致，颜色/清晰度一致。
+/// 同时处理拖拽移动 + 双击关闭。
+final class PinImageView: NSView {
+
+    var cgImage: CGImage?
 
     private var dragStartMouse: NSPoint = .zero
     private var dragStartOrigin: NSPoint = .zero
@@ -55,9 +56,15 @@ final class PinImageView: NSImageView {
     private let doubleClickInterval: TimeInterval = 0.3
 
     override var mouseDownCanMoveWindow: Bool { false }
+    override var isFlipped: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext, let cg = cgImage else { return }
+        // 与覆盖层完全一致的绘制方式：ctx.draw(cgImage, in: bounds)
+        ctx.draw(cg, in: bounds)
+    }
 
     override func mouseDown(with event: NSEvent) {
-        // 记录拖拽起点（屏幕坐标）
         dragStartMouse = NSEvent.mouseLocation
         dragStartOrigin = window?.frame.origin ?? .zero
     }
@@ -73,7 +80,6 @@ final class PinImageView: NSImageView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        // 双击关闭贴图
         let now = Date()
         if now.timeIntervalSince(lastClickTime) < doubleClickInterval {
             (window as? PinWindow)?.closePin()
