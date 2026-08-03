@@ -110,9 +110,31 @@ final class SelectionRectTests: XCTestCase {
         let pixels = SelectionRect.scaleToPixels(sel, imageSize: imageSize, viewSize: viewSize)
         XCTAssertEqual(pixels.width, 600, accuracy: 0.001)
         XCTAssertEqual(pixels.height, 800, accuracy: 0.001)
-        // 反推显示尺寸：像素 / 缩放比 = 点尺寸 = 选区尺寸
-        let scaleX = imageSize.width / viewSize.width
-        let displaySize = CGSize(width: pixels.width / scaleX, height: pixels.height / scaleX)
-        XCTAssertEqual(displaySize, sel.size)
+        // 像素 -> 点尺寸：像素 / 缩放比 = 点尺寸 = 选区尺寸
+        XCTAssertEqual(SelectionRect.pointSize(pixelSize: pixels.size, scaleFactor: 2.0), sel.size)
+    }
+
+    func test_pointSize_retina2x() {
+        let pts = SelectionRect.pointSize(pixelSize: CGSize(width: 600, height: 800), scaleFactor: 2.0)
+        XCTAssertEqual(pts.width, 300, accuracy: 0.001)
+        XCTAssertEqual(pts.height, 400, accuracy: 0.001)
+    }
+
+    func test_pointSize_zeroScale() {
+        // 缩放比为 0 时不崩溃，返回原值
+        let pts = SelectionRect.pointSize(pixelSize: CGSize(width: 100, height: 200), scaleFactor: 0)
+        XCTAssertEqual(pts, CGSize(width: 100, height: 200))
+    }
+
+    // MARK: - 贴图拖拽位移
+
+    func test_dragOrigin_movesByDelta() {
+        // 鼠标从 (500,600) 移到 (550,580)，窗口原点 (100,200) 应移动 delta(50,-20) -> (150,180)
+        let origin = SelectionRect.dragOrigin(
+            initialOrigin: CGPoint(x: 100, y: 200),
+            initialMouse: CGPoint(x: 500, y: 600),
+            currentMouse: CGPoint(x: 550, y: 580)
+        )
+        XCTAssertEqual(origin, CGPoint(x: 150, y: 180))
     }
 }

@@ -1,7 +1,7 @@
 import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
-/// 模拟浮光（Snipaste）的贴图功能。右键或双击关闭。
+/// 模拟浮光（Snipaste）的贴图功能。拖拽移动、右键或双击关闭。
 final class PinWindow: NSWindow {
 
     /// 贴图关闭时回调（用于协调器从列表中移除、释放图片）。
@@ -24,7 +24,7 @@ final class PinWindow: NSWindow {
         self.isMovable = true
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let imageView = NSImageView(frame: NSRect(origin: .zero, size: size))
+        let imageView = PinImageView(frame: NSRect(origin: .zero, size: size))
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyDown
         imageView.autoresizingMask = [.width, .height]
@@ -35,19 +35,49 @@ final class PinWindow: NSWindow {
         let closeItem = menu.addItem(withTitle: "关闭贴图", action: #selector(closePin), keyEquivalent: "")
         closeItem.target = self
         imageView.menu = menu
-
-        // 双击关闭贴图
-        let closeGesture = NSClickGestureRecognizer(target: self, action: #selector(closeOnDouble(_:)))
-        closeGesture.numberOfClicksRequired = 2
-        contentView?.addGestureRecognizer(closeGesture)
     }
 
-    @objc private func closePin() {
+    /// 关闭贴图并通知协调器释放资源。
+    @objc func closePin() {
         orderOut(nil)
         onClose?()
     }
+}
 
-    @objc private func closeOnDouble(_ sender: NSClickGestureRecognizer) {
-        closePin()
+/// 贴图图片视图：自定义拖拽移动 + 双击关闭。
+/// NSImageView 默认 mouseDownCanMoveWindow=false 且手势识别器会干扰拖拽，
+/// 故自行处理 mouseDown/mouseDragged/mouseUp。
+final class PinImageView: NSImageView {
+
+    private var dragStartMouse: NSPoint = .zero
+    private var dragStartOrigin: NSPoint = .zero
+    private var lastClickTime: Date = .distantPast
+    private let doubleClickInterval: TimeInterval = 0.3
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        // 记录拖拽起点（屏幕坐标）
+        dragStartMouse = NSEvent.mouseLocation
+        dragStartOrigin = window?.frame.origin ?? .zero
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let current = NSEvent.mouseLocation
+        let newOrigin = SelectionRect.dragOrigin(
+            initialOrigin: dragStartOrigin,
+            initialMouse: dragStartMouse,
+            currentMouse: current
+        )
+        window?.setFrameOrigin(newOrigin)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // 双击关闭贴图
+        let now = Date()
+        if now.timeIntervalSince(lastClickTime) < doubleClickInterval {
+            (window as? PinWindow)?.closePin()
+        }
+        lastClickTime = now
     }
 }

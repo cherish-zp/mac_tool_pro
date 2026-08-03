@@ -63,8 +63,13 @@ final class ScrollCaptureController {
                 completion(nil)
                 return
             }
-            let image = NSImage(cgImage: stitched,
-                                size: NSSize(width: stitched.width, height: stitched.height))
+            // 像素尺寸 -> 点尺寸，避免贴图变形（同 renderFinalImage 修复）
+            let scaleFactor = rect.width > 0 ? CGFloat(firstFrame.width) / rect.width : 1
+            let displaySize = SelectionRect.pointSize(
+                pixelSize: CGSize(width: stitched.width, height: stitched.height),
+                scaleFactor: scaleFactor
+            )
+            let image = NSImage(cgImage: stitched, size: displaySize)
             self.saveAndCopy(image: image)
             completion(image)
         }

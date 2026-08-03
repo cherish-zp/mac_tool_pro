@@ -47,4 +47,16 @@ public enum SelectionRect {
     public static func toAbsolute(_ local: CGPoint, origin: CGPoint) -> CGPoint {
         CGPoint(x: local.x + origin.x, y: local.y + origin.y)
     }
+
+    /// 将像素尺寸转换为点尺寸（用于 NSImage 的 size 属性，避免贴图变形）。
+    public static func pointSize(pixelSize: CGSize, scaleFactor: CGFloat) -> CGSize {
+        guard scaleFactor > 0 else { return pixelSize }
+        return CGSize(width: pixelSize.width / scaleFactor, height: pixelSize.height / scaleFactor)
+    }
+
+    /// 根据鼠标位移计算贴图窗口新原点（拖拽移动）。
+    public static func dragOrigin(initialOrigin: CGPoint, initialMouse: CGPoint, currentMouse: CGPoint) -> CGPoint {
+        CGPoint(x: initialOrigin.x + (currentMouse.x - initialMouse.x),
+                y: initialOrigin.y + (currentMouse.y - initialMouse.y))
+    }
 }
