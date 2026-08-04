@@ -8,13 +8,14 @@ final class CGEventTapHotkeyListener {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var targetKeyCode: CGKeyCode = 0
-    private var handler: (() -> Void)?
+    private var targetKeyCodes: Set<CGKeyCode> = []
+    private var handler: ((CGKeyCode) -> Bool)?
     private var hasLoggedAnyKey = false
 
-    /// 启动事件监听。targetKeyCode 为目标虚拟键码（F1=122）。
-    func start(keyCode: CGKeyCode, handler: @escaping () -> Void) {
-        self.targetKeyCode = keyCode
+    /// 启动事件监听，同时监听多个键码。
+    /// handler 接收匹配到的键码，返回 true 表示消费该事件（阻止系统默认行为）。
+    func start(keyCodes: [CGKeyCode], handler: @escaping (CGKeyCode) -> Bool) {
+        self.targetKeyCodes = Set(keyCodes)
         self.handler = handler
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
@@ -30,10 +31,13 @@ final class CGEventTapHotkeyListener {
                     listener.hasLoggedAnyKey = true
                     DiagLog.write("CGEventTap: first keyDown received, keyCode=\(code)")
                 }
-                if code == Int64(listener.targetKeyCode) {
-                    DiagLog.write("CGEventTap: keyCode=\(code) matched F1, triggering handler")
-                    listener.handler?()
-                    return nil
+                let cgCode = CGKeyCode(code)
+                if listener.targetKeyCodes.contains(cgCode) {
+                    DiagLog.write("CGEventTap: keyCode=\(code) matched target set, dispatching handler")
+                    if listener.handler?(cgCode) == true {
+                        return nil // 消费事件，阻止系统默认行为
+                    }
+                    // handler 返回 false -> 不消费，放行给系统
                 }
             }
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -57,7 +61,7 @@ final class CGEventTapHotkeyListener {
             return
         }
 
-        DiagLog.write("CGEventTap: tapCreate success for keyCode=\(keyCode)")
+        DiagLog.write("CGEventTap: tapCreate success for keyCodes=\(keyCodes)")
         eventTap = tap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)

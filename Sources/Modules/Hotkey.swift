@@ -23,4 +23,7 @@ public struct Hotkey: Codable, Equatable, Hashable {
 
     /// F1 = kVK_F1(122)，截图默认快捷键。
     public static let f1 = Hotkey(keyCode: 122)
+
+    /// F3 = kVK_F3(99)，贴图默认快捷键（截图选区完成后按 F3 贴图到桌面）。
+    public static let f3 = Hotkey(keyCode: 99)
 }

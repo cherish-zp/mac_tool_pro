@@ -29,4 +29,16 @@ final class ScreenshotModule: AppModule {
         self.coordinator = coord
         coord.start()
     }
+
+    /// 贴图当前选区（F3 触发）。仅截图会话活跃时生效。
+    /// 返回 true 表示已处理（消费按键），false 表示无活跃会话（放行按键）。
+    @discardableResult
+    func pin() -> Bool {
+        guard session.state == .active else {
+            DiagLog.write("ScreenshotModule.pin() ignored - no active session")
+            return false
+        }
+        coordinator?.pinCurrentSelection()
+        return true
+    }
 }

@@ -1,5 +1,13 @@
 import CoreGraphics
 
+/// 选区缩放手柄类型（8 个边角 + 内部用于移动）。
+public enum ResizeHandle: Equatable {
+    case topLeft, top, topRight
+    case left, right
+    case bottomLeft, bottom, bottomRight
+    case interior
+}
+
 /// 截图选区的几何计算工具：规范化拖拽矩形、夹取到屏幕边界、约束最小尺寸。
 /// 纯函数，无副作用，便于单测。
 public enum SelectionRect {
@@ -58,6 +66,80 @@ public enum SelectionRect {
     public static func dragOrigin(initialOrigin: CGPoint, initialMouse: CGPoint, currentMouse: CGPoint) -> CGPoint {
         CGPoint(x: initialOrigin.x + (currentMouse.x - initialMouse.x),
                 y: initialOrigin.y + (currentMouse.y - initialMouse.y))
+    }
+
+    // MARK: - 选区移动/缩放
+
+    /// 命中检测：判断鼠标点落在选区的哪个手柄上（边角/内部/外部）。
+    public static func hitTest(point: CGPoint, in rect: CGRect, handleSize: CGFloat) -> ResizeHandle? {
+        let expanded = rect.insetBy(dx: -handleSize, dy: -handleSize)
+        if !expanded.contains(point) { return nil }
+        let nearLeft = point.x <= rect.minX + handleSize
+        let nearRight = point.x >= rect.maxX - handleSize
+        let nearBottom = point.y <= rect.minY + handleSize
+        let nearTop = point.y >= rect.maxY - handleSize
+        if nearLeft && nearBottom { return .bottomLeft }
+        if nearLeft && nearTop { return .topLeft }
+        if nearRight && nearBottom { return .bottomRight }
+        if nearRight && nearTop { return .topRight }
+        if nearLeft { return .left }
+        if nearRight { return .right }
+        if nearBottom { return .bottom }
+        if nearTop { return .top }
+        return .interior
+    }
+
+    /// 移动选区，夹取到 bounds 范围内。
+    public static func move(_ rect: CGRect, by delta: CGVector, bounds: CGRect) -> CGRect {
+        var r = rect.offsetBy(dx: delta.dx, dy: delta.dy)
+        if r.minX < bounds.minX { r.origin.x = bounds.minX }
+        if r.minY < bounds.minY { r.origin.y = bounds.minY }
+        if r.maxX > bounds.maxX { r.origin.x = bounds.maxX - r.width }
+        if r.maxY > bounds.maxY { r.origin.y = bounds.maxY - r.height }
+        return r
+    }
+
+    /// 缩放选区：根据手柄和位移调整对应边，约束最小尺寸并夹取到 bounds。
+   public static func resize(_ rect: CGRect, handle: ResizeHandle,
+                             delta: CGVector, minSize: CGFloat, bounds: CGRect) -> CGRect {
+       var r = rect
+       switch handle {
+       case .bottomLeft:
+           r.origin.x += delta.dx; r.size.width -= delta.dx
+           r.origin.y += delta.dy; r.size.height -= delta.dy
+       case .bottom:
+           r.origin.y += delta.dy; r.size.height -= delta.dy
+       case .bottomRight:
+           r.origin.y += delta.dy; r.size.height -= delta.dy
+           r.size.width += delta.dx
+       case .left:
+           r.origin.x += delta.dx; r.size.width -= delta.dx
+       case .right:
+           r.size.width += delta.dx
+       case .topLeft:
+           r.origin.x += delta.dx; r.size.width -= delta.dx
+           r.size.height += delta.dy
+       case .top:
+           r.size.height += delta.dy
+       case .topRight:
+           r.size.width += delta.dx; r.size.height += delta.dy
+       case .interior:
+           break
+       }
+       // 约束最小尺寸：左边/下边手柄收缩时固定对边
+       if r.width < minSize {
+           if [.left, .bottomLeft, .topLeft].contains(handle) {
+               r.origin.x = r.maxX - minSize
+           }
+           r.size.width = minSize
+       }
+       if r.height < minSize {
+           if [.bottom, .bottomLeft, .bottomRight].contains(handle) {
+               r.origin.y = r.maxY - minSize
+           }
+           r.size.height = minSize
+       }
+       return clamp(r, to: bounds)
     }
 
     /// 计算 CGImage.cropping(to:) 所需的裁剪矩形。

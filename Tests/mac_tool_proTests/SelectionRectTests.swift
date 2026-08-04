@@ -215,4 +215,66 @@ final class SelectionRectTests: XCTestCase {
         )
         XCTAssertEqual(cropRect.origin.y, 1400, accuracy: 0.001)
     }
+
+    // MARK: - 选区拖拽移动
+
+    func test_moveRect_withinBounds() {
+        let bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let moved = SelectionRect.move(rect, by: CGVector(dx: 50, dy: 30), bounds: bounds)
+        XCTAssertEqual(moved.origin, CGPoint(x: 150, y: 230))
+        XCTAssertEqual(moved.size, rect.size)
+    }
+
+    func test_moveRect_clampedToBounds() {
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let rect = CGRect(x: 900, y: 700, width: 200, height: 150)
+        let moved = SelectionRect.move(rect, by: CGVector(dx: 200, dy: 200), bounds: bounds)
+        XCTAssertEqual(moved.maxX, 1000, accuracy: 0.001)
+        XCTAssertEqual(moved.maxY, 800, accuracy: 0.001)
+    }
+
+    // MARK: - 选区缩放手柄命中检测
+
+    func test_hitTest_corner() {
+        let rect = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let handle = SelectionRect.hitTest(point: CGPoint(x: 105, y: 205), in: rect, handleSize: 10)
+        XCTAssertEqual(handle, .bottomLeft)
+    }
+
+    func test_hitTest_interior() {
+        let rect = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let handle = SelectionRect.hitTest(point: CGPoint(x: 250, y: 400), in: rect, handleSize: 10)
+        XCTAssertEqual(handle, .interior)
+    }
+
+    func test_hitTest_exterior() {
+        let rect = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let handle = SelectionRect.hitTest(point: CGPoint(x: 50, y: 50), in: rect, handleSize: 10)
+        XCTAssertNil(handle)
+    }
+
+    // MARK: - 选区缩放
+
+    func test_resize_bottomLeft() {
+        let bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 200, width: 300, height: 400)
+        let resized = SelectionRect.resize(rect, handle: .bottomLeft,
+                                           delta: CGVector(dx: -50, dy: -50),
+                                           minSize: 10, bounds: bounds)
+        XCTAssertEqual(resized.origin.x, 50, accuracy: 0.001)
+        XCTAssertEqual(resized.origin.y, 150, accuracy: 0.001)
+        XCTAssertEqual(resized.width, 350, accuracy: 0.001)
+        XCTAssertEqual(resized.height, 450, accuracy: 0.001)
+    }
+
+    func test_resize_enforcesMinSize() {
+        let bounds = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 200, width: 100, height: 100)
+        let resized = SelectionRect.resize(rect, handle: .topRight,
+                                           delta: CGVector(dx: -200, dy: -200),
+                                           minSize: 50, bounds: bounds)
+        XCTAssertGreaterThanOrEqual(resized.width, 50)
+        XCTAssertGreaterThanOrEqual(resized.height, 50)
+    }
 }

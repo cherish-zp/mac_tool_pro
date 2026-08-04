@@ -12,6 +12,8 @@ final class ScreenshotCoordinator {
     private var activeOverlay: ScreenshotOverlayWindow?
     private var selectionRect: CGRect?
     private var escMonitor: Any?
+    /// 选区超时定时器：覆盖层显示后若用户长时间未操作（如全屏下覆盖层不可见），自动清理。
+    private var idleTimeoutTimer: Timer?
 
     /// 截图会话结束时回调（用于重置 ScreenshotSession 状态）。
     var onFinished: (() -> Void)?
@@ -30,9 +32,8 @@ final class ScreenshotCoordinator {
         DiagLog.write("Captured \(displays.count) display(s)")
         guard !displays.isEmpty else { finish(); return }
 
-        // 3. 临时切换为常规应用以获得焦点
-        NSApp.setActivationPolicy(.regular)
-        // 强制激活 App（ignoringOtherApps 更可靠，避免首击被窗口激活吞掉）
+        // 不切换 activationPolicy：accessory App 切到 .regular 会导致系统切换 Space，
+        // 在其他 App 全屏时覆盖层无法显示。保持 .accessory + activate 即可在当前 Space 显示。
         NSApp.activate(ignoringOtherApps: true)
 
         // 4. 为每个屏幕创建覆盖层窗口
@@ -64,8 +65,76 @@ final class ScreenshotCoordinator {
             DiagLog.write("Key window set: frame=\(keyWindow.frame)")
         }
 
-        // 5. 安装 ESC 本地事件监听（不依赖 first responder）
-        installEscMonitor()
+       // 5. 安装 ESC 本地事件监听（不依赖 first responder）
+       installEscMonitor()
+
+       // 6. 自动检测鼠标下窗口区域作为初始选区
+       autoDetectSelection()
+
+       // 6. 空闲超时安全网：若覆盖层不可见（如全屏 Space 下），15 秒后自动清理
+       // 7. 空闲超时安全网：若覆盖层不可见（如全屏 Space 下），15 秒后自动清理
+       startIdleTimeout()
+    }
+
+    /// 启动空闲超时定时器：用户未做任何操作（选区）时自动结束会话。
+    private func startIdleTimeout() {
+        idleTimeoutTimer?.invalidate()
+        idleTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: false) { [weak self] _ in
+            guard let self = self, !self.overlayWindows.isEmpty else { return }
+            DiagLog.write("Idle timeout: no interaction within 15s, finishing screenshot (overlay may not be visible)")
+            self.finish()
+        }
+    }
+
+    /// 取消空闲超时定时器（用户已开始操作）。
+    private func cancelIdleTimeout() {
+        idleTimeoutTimer?.invalidate()
+        idleTimeoutTimer = nil
+    }
+
+    /// 自动检测鼠标所在屏幕下最顶层窗口的区域，作为初始选区。
+    private func autoDetectSelection() {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let mouseScreen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) else { return }
+        guard let overlay = overlayWindows.first(where: { $0.screen == mouseScreen }) else { return }
+        guard let detected = detectWindowUnderMouse(on: mouseScreen) else { return }
+
+        let view = overlay.overlayView!
+        let clamped = SelectionRect.clamp(detected, to: view.bounds)
+        guard SelectionRect.isValid(clamped, minimum: 10) else { return }
+        view.selectionRect = clamped
+        view.needsDisplay = true
+        DiagLog.write("Auto-detected selection: \(clamped) on screen \(mouseScreen.frame)")
+    }
+
+    /// 通过 CGWindowList 检测鼠标下最顶层的普通窗口（排除自身），返回视图坐标矩形。
+    private func detectWindowUnderMouse(on screen: NSScreen) -> CGRect? {
+        let mouse = NSEvent.mouseLocation
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        // CG 坐标原点在主屏左上，NSScreen 原点在左下，需翻转 y 轴
+        let cgMouse = CGPoint(x: mouse.x, y: primaryHeight - mouse.y)
+
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+
+        let ourPid = ProcessInfo.processInfo.processIdentifier
+        let windows: [WindowInfo] = windowList.compactMap { info in
+            guard let boundsRef = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsRef),
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  let pid = info[kCGWindowOwnerPID as String] as? Int,
+                  let windowId = info[kCGWindowNumber as String] as? Int else { return nil }
+            return WindowInfo(bounds: bounds, layer: layer, ownerPid: Int32(pid), windowId: windowId)
+        }
+
+        guard let detected = WindowDetector.topmostWindow(
+            at: cgMouse, in: windows, excludingPids: [ourPid]
+        ) else { return nil }
+
+        return ScreenCoordinateConverter.cgRectToViewRect(
+            detected.bounds, screenFrame: screen.frame, primaryScreenHeight: primaryHeight
+        )
     }
 
     /// 清理残留的旧覆盖层窗口（防止多次 F1 导致叠加变黑）。
@@ -89,41 +158,61 @@ final class ScreenshotCoordinator {
                 if self?.activeOverlay?.overlayView?.cancelTextEditingIfActive() == true {
                     return nil
                 }
-                DiagLog.write("ESC pressed via local monitor, cancelling screenshot")
-                self?.cancel()
-                return nil // 消费事件
+               DiagLog.write("ESC pressed via local monitor, cancelling screenshot")
+               self?.cancel()
+               return nil // 消费事件
+           }
+            // F3 = 贴图当前选区（本地监听备份，覆盖层为 key 窗口时可靠触发）
+            if event.keyCode == ScreenshotHotkeyAction.f3KeyCode {
+                DiagLog.write("F3 pressed via local monitor, pinning selection")
+                self?.pinCurrentSelection()
+                return nil
             }
             return event
         }
-        DiagLog.write("ESC local monitor installed")
+        DiagLog.write("ESC + F3 local monitor installed")
     }
 
     // MARK: 选区完成
 
     private func handleSelectionComplete(rect: CGRect, window: ScreenshotOverlayWindow?) {
         guard let window = window else { return }
+        // 用户已开始操作，取消空闲超时
+        cancelIdleTimeout()
         activeOverlay = window
         selectionRect = rect
-        window.overlayView!.isEditMode = true
+       window.overlayView!.isEditMode = true
         // 不自动选标注工具：默认光标模式，用户从工具条选择后才开始画标注
         window.overlayView!.currentTool = nil
+        // 默认圆角夹取到选区尺寸上限，同步工具条按钮状态
+        window.overlayView!.cornerRadius = CornerRounding.clampedRadius(
+            window.overlayView!.cornerRadius, for: rect.size)
         window.overlayView!.needsDisplay = true
+        // 选区移动/缩放后同步协调器的 selectionRect，确保后续贴图/保存裁剪正确
+       window.overlayView!.onSelectionChanged = { [weak self] newRect in
+           self?.selectionRect = newRect
+       }
+        // 标注变化时同步撤销按钮可用状态
+        window.overlayView!.onAnnotationsChanged = { [weak self] in
+            guard let view = self?.activeOverlay?.overlayView else { return }
+            self?.toolbar?.updateUndoButton(canUndo: view.annotations.canUndo)
+        }
 
         let toolbar = ScreenshotToolbar()
         toolbar.toolbarDelegate = self
         let tbFrame = toolbar.frame
         let screen = window.screen ?? NSScreen.main!
-        var originX = rect.midX - tbFrame.width / 2
-        var originY = rect.maxY + 8
-        if originY + tbFrame.height > screen.frame.maxY {
-            originY = rect.minY - tbFrame.height - 8
-        }
-        originX = max(screen.frame.minX, min(originX, screen.frame.maxX - tbFrame.width))
-        toolbar.setFrameOrigin(NSPoint(x: originX, y: originY))
+        // 工具条定位在选区正上方（含屏幕 origin 偏移，支持多屏）
+        let pos = ToolbarPositioner.position(
+            forSelection: rect, toolbarSize: tbFrame.size, screenFrame: screen.frame
+        )
+        toolbar.setFrameOrigin(pos)
         // 工具条为 nonactivatingPanel，仅显示不抢占 key；保持覆盖层为 key 窗口，
         // 否则点击覆盖层时首击被窗口激活吞掉、无法绘制标注
-        toolbar.orderFrontRegardless()
+       toolbar.orderFrontRegardless()
         self.toolbar = toolbar
+        // 同步圆角按钮状态（默认已启用圆角）
+        toolbar.updateCornerRadius(window.overlayView!.cornerRadius)
 
         for w in overlayWindows where w !== window {
             w.orderOut(nil)
@@ -153,13 +242,38 @@ final class ScreenshotCoordinator {
       guard let cropped = image.cropping(to: cropRect) else { return nil }
        DiagLog.write("renderFinalImage: full=\(image.width)x\(image.height) cropRect=\(cropRect) cropped=\(cropped.width)x\(cropped.height) selPts=\(sel.size) annotations=\(view.annotations.count)")
 
-        let finalImage: CGImage
+       var finalImage: CGImage
         if view.annotations.count > 0 || view.drawingAnnotation != nil {
            finalImage = compositeAnnotations(on: cropped, from: overlay) ?? cropped
         } else {
             finalImage = cropped
         }
+
+        // 应用圆角蒙版（半径 > 0 时裁剪为圆角，四角透明）
+        let ptRadius = CornerRounding.clampedRadius(view.cornerRadius, for: sel.size)
+        if ptRadius > 0 {
+            let scaleX = view.bounds.width > 0 ? CGFloat(cropped.width) / view.bounds.width : 1
+            let pxRadius = ptRadius * scaleX
+            if let rounded = applyRoundedCorners(to: finalImage, radius: pxRadius) {
+                finalImage = rounded
+            }
+        }
         return finalImage
+    }
+
+    /// 将 CGImage 四角裁剪为圆角（透明），用于圆角截图输出。
+    private func applyRoundedCorners(to image: CGImage, radius: CGFloat) -> CGImage? {
+        let w = image.width
+        let h = image.height
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        ctx.addPath(CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        ctx.clip()
+        ctx.draw(image, in: bounds)
+        return ctx.makeImage()
     }
 
     private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow) -> CGImage? {
@@ -229,8 +343,19 @@ final class ScreenshotCoordinator {
         pinWindows.append(pin)
     }
 
+    /// 贴图当前选区并结束截图会话（F3 触发）。无选区时为空操作。
+    func pinCurrentSelection() {
+        guard selectionRect != nil else {
+            DiagLog.write("pinCurrentSelection: no selection, ignoring")
+            return
+        }
+        pinToDesktop()
+        finish()
+    }
+
     /// 结束截图会话：关闭所有覆盖层窗口、工具条，移除事件监听，恢复 App 策略。
     func finish() {
+        cancelIdleTimeout()
         for w in overlayWindows { w.orderOut(nil) }
         toolbar?.orderOut(nil)
         overlayWindows.removeAll()
@@ -243,8 +368,7 @@ final class ScreenshotCoordinator {
             self.escMonitor = nil
         }
 
-        NSApp.setActivationPolicy(.accessory)
-        DiagLog.write("Screenshot finished, restored accessory policy")
+        DiagLog.write("Screenshot finished")
         onFinished?()
     }
 
@@ -283,6 +407,23 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
             toolbar?.selectTool(tool)
             DiagLog.write("toolbarDidSelectColor: auto-selected tool=\(String(describing: tool))")
         }
+    }
+
+    func toolbarDidToggleCornerRadius() {
+        guard let view = activeOverlay?.overlayView, let sel = selectionRect else { return }
+        let next = CornerRounding.nextRadius(view.cornerRadius)
+        view.cornerRadius = CornerRounding.clampedRadius(next, for: sel.size)
+        toolbar?.updateCornerRadius(view.cornerRadius)
+        view.needsDisplay = true
+        DiagLog.write("toolbarDidToggleCornerRadius: radius=\(view.cornerRadius)")
+    }
+
+    func toolbarDidUndo() {
+        guard let view = activeOverlay?.overlayView else { return }
+        view.annotations.undo()
+        view.needsDisplay = true
+        toolbar?.updateUndoButton(canUndo: view.annotations.canUndo)
+        DiagLog.write("toolbarDidUndo: remaining=\(view.annotations.count)")
     }
 
     func toolbarDidCopy() { copyToClipboard(); finish() }

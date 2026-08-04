@@ -93,4 +93,27 @@ final class AnnotationModelTests: XCTestCase {
             strokeWidth: 3
         )
     }
+
+    // MARK: - canUndo
+
+    func test_canUndo_empty_isFalse() {
+        let model = AnnotationModel()
+        XCTAssertFalse(model.canUndo)
+    }
+
+    func test_canUndo_withAnnotations_isTrue() {
+        let model = AnnotationModel()
+        model.add(makeAnnotation(.rectangle))
+        XCTAssertTrue(model.canUndo)
+    }
+
+    func test_canUndo_afterUndoAll_isFalse() {
+        let model = AnnotationModel()
+        model.add(makeAnnotation(.rectangle))
+        model.add(makeAnnotation(.arrow))
+        _ = model.undo()
+        XCTAssertTrue(model.canUndo)
+        _ = model.undo()
+        XCTAssertFalse(model.canUndo)
+    }
 }

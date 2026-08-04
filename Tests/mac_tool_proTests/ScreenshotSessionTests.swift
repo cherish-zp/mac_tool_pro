@@ -39,3 +39,37 @@ final class ScreenshotSessionTests: XCTestCase {
         XCTAssertEqual(ScreenshotSession.escKeyCode, 53)
     }
 }
+
+    // MARK: - 超时安全网（覆盖层未显示时会话卡死防护）
+
+    func test_isTimedOut_immediatelyAfterStart_isFalse() {
+        let session = ScreenshotSession()
+        let now = Date()
+        _ = session.start(at: now)
+        XCTAssertFalse(session.isTimedOut(now: now))
+    }
+
+    func test_isTimedOut_afterInterval_isTrue() {
+        let session = ScreenshotSession()
+        let start = Date()
+        _ = session.start(at: start)
+        let later = start.addingTimeInterval(session.timeoutInterval + 1)
+        XCTAssertTrue(session.isTimedOut(now: later))
+    }
+
+    func test_isTimedOut_beforeInterval_isFalse() {
+        let session = ScreenshotSession()
+        let start = Date()
+        _ = session.start(at: start)
+        let later = start.addingTimeInterval(session.timeoutInterval - 1)
+        XCTAssertFalse(session.isTimedOut(now: later))
+    }
+
+    func test_isTimedOut_afterFinish_isFalse() {
+        let session = ScreenshotSession()
+        let start = Date()
+        _ = session.start(at: start)
+        session.finish()
+        let later = start.addingTimeInterval(session.timeoutInterval + 10)
+        XCTAssertFalse(session.isTimedOut(now: later))
+    }

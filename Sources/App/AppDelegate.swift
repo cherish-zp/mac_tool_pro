@@ -56,12 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // NSEvent 全局监控备选方案
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 122 { // F1
+            if ScreenshotHotkeyAction.action(for: UInt32(event.keyCode)) == .screenshot {
                 DiagLog.write("NSEvent global monitor: F1 detected")
                 self?.triggerScreenshot()
             }
         }
-        DiagLog.write("Hotkey listeners installed (CGEventTap + NSEvent monitor)")
+        DiagLog.write("Hotkey listeners installed (CGEventTap + NSEvent monitor) for F1+F3")
 
         // 如果权限未授予，启动定时器等待用户授权后自动重建 CGEventTap
         if !trusted {
@@ -73,8 +73,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @discardableResult
     private func tryStartEventTap() -> Bool {
         let tapListener = CGEventTapHotkeyListener()
-        tapListener.start(keyCode: 122) { [weak self] in
-            self?.triggerScreenshot()
+        tapListener.start(keyCodes: [122, 99]) { [weak self] keyCode in
+            guard let self = self else { return false }
+            switch ScreenshotHotkeyAction.action(for: UInt32(keyCode)) {
+            case .screenshot:
+                // F1：始终消费，触发截图
+                self.triggerScreenshot()
+                return true
+            case .pin:
+                // F3：仅在截图会话活跃时消费并贴图，否则放行给系统
+                if self.screenshotModule.pin() {
+                    return true
+                }
+                return false
+            case nil:
+                return false
+            }
         }
         // start() 内部会记录成功/失败日志
         eventTapListener = tapListener

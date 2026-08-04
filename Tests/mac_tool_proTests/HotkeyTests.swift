@@ -20,6 +20,10 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(Hotkey.f1, Hotkey(keyCode: 122, modifiers: 0))
     }
 
+    func test_f3_default() {
+        XCTAssertEqual(Hotkey.f3, Hotkey(keyCode: 99, modifiers: 0))
+    }
+
     func test_equality() {
         XCTAssertEqual(Hotkey(keyCode: 122, modifiers: ModifierKey.command),
                        Hotkey(keyCode: 122, modifiers: ModifierKey.command))

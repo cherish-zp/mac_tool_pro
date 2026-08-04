@@ -52,6 +52,9 @@ public final class AnnotationModel: Codable {
 
     public var count: Int { annotations.count }
 
+    /// 是否有可撤销的标注（用于启用/禁用撤销按钮）。
+    public var canUndo: Bool { !annotations.isEmpty }
+
     public func add(_ annotation: Annotation) {
         annotations.append(annotation)
     }
