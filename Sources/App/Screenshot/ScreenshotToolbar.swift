@@ -24,7 +24,7 @@ final class ScreenshotToolbar: NSWindow {
     private(set) var selectedColor: AnnotationColor = .red
 
     init() {
-        let frame = NSRect(x: 0, y: 0, width: 740, height: 44)
+        let frame = NSRect(x: 0, y: 0, width: 690, height: 44)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
@@ -126,10 +126,24 @@ final class ScreenshotToolbar: NSWindow {
 
         // 操作按钮
         x = addActionButton(container, x: x, y: y, title: "滚动", action: #selector(scrollTapped), color: .systemPurple)
-        x = addActionButton(container, x: x + 4, y: y, title: "剪贴板", action: #selector(copyTapped), color: .systemBlue)
         x = addActionButton(container, x: x + 4, y: y, title: "保存", action: #selector(saveTapped), color: .systemGreen)
         x = addActionButton(container, x: x + 4, y: y, title: "贴图", action: #selector(pinTapped), color: .systemOrange)
         x = addActionButton(container, x: x + 4, y: y, title: "取消", action: #selector(cancelTapped), color: .systemRed)
+
+      // 对勾按钮：复制到剪贴板（最常用，放最后方便点击）
+        let copyBtn = NSButton(frame: NSRect(x: x + 6, y: y, width: 28, height: 28))
+       copyBtn.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "复制")
+        copyBtn.image?.isTemplate = true
+        copyBtn.contentTintColor = .white
+        copyBtn.isBordered = false
+        copyBtn.wantsLayer = true
+        copyBtn.layer?.cornerRadius = 6
+        copyBtn.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        copyBtn.toolTip = "复制"
+        copyBtn.target = self
+       copyBtn.action = #selector(copyTapped)
+       container.addSubview(copyBtn)
+        container.copyButton = copyBtn
     }
 
     private func addToolButton(_ container: NSView, x: CGFloat, y: CGFloat, size: CGFloat,
@@ -260,9 +274,14 @@ final class ScreenshotToolbar: NSWindow {
 
 }
 
-/// 工具条内容视图：强制显示箭头光标。
-/// nonactivatingPanel 下 cursorRect 可能不生效，额外用 trackingArea 兜底。
+/// 工具条内容视图：强制显示箭头光标，并管理对勾复制按钮的悬停提示。
+/// nonactivatingPanel 下 cursorRect 与 mouseEntered 不可靠，改用 mouseMoved
+/// tracking area（已验证有效）检测悬停，提示用独立小窗口显示避免裁剪。
 final class ToolbarContainerView: NSView {
+    weak var copyButton: NSButton?
+    private var hoverState = CopyButtonHoverState()
+    private var tooltipWindow: NSPanel?
+
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: NSCursor.arrow)
     }
@@ -277,13 +296,70 @@ final class ToolbarContainerView: NSView {
         ))
     }
 
-    /// 鼠标在工具条任意位置（含子视图）移动时强制箭头光标。
+    /// 鼠标在工具条任意位置（含子视图）移动时强制箭头光标，并更新对勾按钮悬停提示。
     override func mouseMoved(with event: NSEvent) {
         NSCursor.arrow.set()
+        updateCopyTooltip(with: event)
     }
 
     override func cursorUpdate(with event: NSEvent) {
         NSCursor.arrow.set()
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { hideCopyTooltip() }
+    }
+
+    private func updateCopyTooltip(with event: NSEvent) {
+        guard let button = copyButton else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hoverState.update(point: point, buttonFrame: button.frame) else { return }
+        if hoverState.isHovering {
+            showCopyTooltip(for: button)
+        } else {
+            hideCopyTooltip()
+        }
+    }
+
+   private func showCopyTooltip(for button: NSButton) {
+       hideCopyTooltip()
+        let font = NSFont.labelFont(ofSize: 12)
+        let labelSize = CGSize(width: 28, height: 16)
+        let buttonInWindow = button.superview?.convert(button.frame, to: nil) ?? button.frame
+        let winOrigin = button.window?.frame.origin ?? .zero
+        let buttonScreen = buttonInWindow.offsetBy(dx: winOrigin.x, dy: winOrigin.y)
+        let screenFrame = button.window?.screen?.frame ?? NSScreen.main?.frame ?? .zero
+        let frame = CopyButtonTooltip.windowFrame(
+            buttonScreenFrame: buttonScreen, labelSize: labelSize, screenFrame: screenFrame)
+
+        let panel = NSPanel(contentRect: frame,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+
+        let label = NSTextField(labelWithString: "复制")
+        label.font = font
+        label.textColor = .white
+        label.alignment = .center
+        label.wantsLayer = true
+        label.layer?.cornerRadius = 4
+        label.layer?.backgroundColor = NSColor(white: 0, alpha: 0.85).cgColor
+        label.frame = panel.contentView!.bounds
+        label.autoresizingMask = [.width, .height]
+        panel.contentView?.addSubview(label)
+
+        panel.orderFrontRegardless()
+        tooltipWindow = panel
+    }
+
+    private func hideCopyTooltip() {
+        tooltipWindow?.orderOut(nil)
+        tooltipWindow = nil
+    }
 }
