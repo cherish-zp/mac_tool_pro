@@ -25,4 +25,15 @@ final class CursorContextTests: XCTestCase {
         XCTAssertFalse(CursorContext.shouldAnimate(from: .screenshotArea, to: .screenshotArea))
         XCTAssertFalse(CursorContext.shouldAnimate(from: .toolbarArea, to: .toolbarArea))
     }
+
+    // MARK: - 工具条光标显式验证
+
+    func test_toolbarArea_isNotCrosshair() {
+        XCTAssertNotEqual(CursorContext.toolbarArea.defaultStyle, .crosshair)
+        XCTAssertEqual(CursorContext.toolbarArea.defaultStyle, .arrow)
+    }
+
+    func test_screenshotArea_isNotArrow() {
+        XCTAssertNotEqual(CursorContext.screenshotArea.defaultStyle, .arrow)
+    }
 }

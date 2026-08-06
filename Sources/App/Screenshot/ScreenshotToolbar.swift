@@ -38,6 +38,7 @@ final class ScreenshotToolbar: NSWindow {
         self.hasShadow = true
         self.isMovable = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        self.acceptsMouseMovedEvents = true
 
         buildUI()
     }
@@ -271,9 +272,14 @@ final class ToolbarContainerView: NSView {
         for ta in trackingAreas { removeTrackingArea(ta) }
         addTrackingArea(NSTrackingArea(
             rect: bounds,
-            options: [.cursorUpdate, .activeAlways, .inVisibleRect],
+            options: [.mouseMoved, .cursorUpdate, .activeAlways, .inVisibleRect],
             owner: self, userInfo: nil
         ))
+    }
+
+    /// 鼠标在工具条任意位置（含子视图）移动时强制箭头光标。
+    override func mouseMoved(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 
     override func cursorUpdate(with event: NSEvent) {
