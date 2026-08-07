@@ -144,6 +144,7 @@ final class ScreenshotCoordinator {
             for w in overlayWindows { w.orderOut(nil) }
             overlayWindows.removeAll()
         }
+        toolbar?.cleanupColorPanel()
         toolbar?.orderOut(nil)
         toolbar = nil
         activeOverlay = nil
@@ -357,6 +358,7 @@ final class ScreenshotCoordinator {
     func finish() {
         cancelIdleTimeout()
         for w in overlayWindows { w.orderOut(nil) }
+        toolbar?.cleanupColorPanel()
         toolbar?.orderOut(nil)
         overlayWindows.removeAll()
         toolbar = nil
@@ -436,6 +438,7 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
         let screen = overlay.screen ?? NSScreen.main!
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? CGMainDisplayID()
         for w in overlayWindows { w.orderOut(nil) }
+        toolbar?.cleanupColorPanel()
         toolbar?.orderOut(nil)
 
         let controller = ScrollCaptureController()

@@ -1,7 +1,7 @@
 import XCTest
 import CoreGraphics
 
-/// TDD: 对勾复制按钮悬停提示 - 纯函数计算提示窗口屏幕坐标 + 悬停状态机。
+/// TDD: 工具条图标按钮悬停提示 - 纯函数计算提示窗口屏幕坐标 + 多按钮悬停状态机。
 final class CopyButtonTooltipTests: XCTestCase {
 
     private let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
@@ -36,14 +36,22 @@ final class CopyButtonTooltipTests: XCTestCase {
         XCTAssertEqual(frame.minX, 0, accuracy: 0.001)
     }
 
-    func test_hoverState_enterShows_leaveHides() {
-        var state = CopyButtonHoverState()
-        let button = CGRect(x: 0, y: 0, width: 28, height: 28)
-        XCTAssertFalse(state.isHovering)
-        XCTAssertTrue(state.update(point: CGPoint(x: 10, y: 10), buttonFrame: button))
-        XCTAssertTrue(state.isHovering)
-        XCTAssertFalse(state.update(point: CGPoint(x: 10, y: 10), buttonFrame: button))
-        XCTAssertTrue(state.update(point: CGPoint(x: 100, y: 100), buttonFrame: button))
-        XCTAssertFalse(state.isHovering)
+    func test_hoverState_enterLeaveSwitch() {
+        var state = ToolbarHoverState()
+        XCTAssertNil(state.currentTooltip)
+        // 进入复制按钮
+        XCTAssertTrue(state.update(matchedTooltip: "复制"))
+        XCTAssertEqual(state.currentTooltip, "复制")
+        // 停留，无变化
+        XCTAssertFalse(state.update(matchedTooltip: "复制"))
+        // 切换到下载按钮
+        XCTAssertTrue(state.update(matchedTooltip: "下载"))
+        XCTAssertEqual(state.currentTooltip, "下载")
+        // 切换到贴图按钮
+        XCTAssertTrue(state.update(matchedTooltip: "贴图"))
+        XCTAssertEqual(state.currentTooltip, "贴图")
+        // 离开所有按钮
+        XCTAssertTrue(state.update(matchedTooltip: nil))
+        XCTAssertNil(state.currentTooltip)
     }
 }

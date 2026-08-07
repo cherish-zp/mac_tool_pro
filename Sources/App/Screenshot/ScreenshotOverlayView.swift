@@ -241,11 +241,8 @@ final class ScreenshotOverlayView: NSView {
     }
 
     private func nsColor(_ color: AnnotationColor) -> NSColor {
-        switch color {
-        case .red: return .systemRed; case .yellow: return .systemYellow
-        case .green: return .systemGreen; case .blue: return .systemBlue
-        case .white: return .white; case .black: return .black
-        }
+        let rgb = color.rgbComponents
+        return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
     }
 
     // MARK: 鼠标事件（标准坐标系，原点在左下，与 CGContext 一致）

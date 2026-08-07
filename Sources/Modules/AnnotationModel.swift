@@ -9,9 +9,26 @@ public enum AnnotationType: String, Codable, CaseIterable {
     case mosaic
 }
 
-/// 标注颜色（限定调色板，便于工具条统一管理）。
-public enum AnnotationColor: String, Codable, CaseIterable {
-    case red, yellow, green, blue, white, black
+/// 标注颜色：预设调色板 + 自定义 RGB 颜色。
+public enum AnnotationColor: Codable, Equatable, Hashable {
+    case red, green, blue, purple, white, black
+    case custom(red: CGFloat, green: CGFloat, blue: CGFloat)
+
+    /// 预设颜色列表（颜色选择面板展示用），顺序：红、绿、蓝、紫、白、黑。
+    public static let presets: [AnnotationColor] = [.red, .green, .blue, .purple, .white, .black]
+
+    /// 返回颜色的 RGB 分量（0-1），用于绘制和色块展示。
+    public var rgbComponents: (red: CGFloat, green: CGFloat, blue: CGFloat) {
+        switch self {
+        case .red: return (1.0, 0.231, 0.188)
+        case .green: return (0.203, 0.780, 0.349)
+        case .blue: return (0.0, 0.478, 1.0)
+        case .purple: return (0.5, 0.0, 0.5)
+        case .white: return (1.0, 1.0, 1.0)
+        case .black: return (0.0, 0.0, 0.0)
+        case .custom(let r, let g, let b): return (r, g, b)
+        }
+    }
 }
 
 /// 单个标注：类型 + 点序列 + 可选文字 + 颜色 + 线宽。

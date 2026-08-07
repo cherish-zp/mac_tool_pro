@@ -1,8 +1,8 @@
 import CoreGraphics
 
-/// 对勾复制按钮的悬停提示定位：纯函数计算提示窗口的屏幕坐标。
+/// 工具条图标按钮的悬停提示定位：纯函数计算提示窗口的屏幕坐标。
 /// nonactivatingPanel 下系统 toolTip 不可靠，改用独立小窗口显示提示，
-/// 此模块仅负责几何计算，便于单测。
+/// 此模块仅负责几何计算，便于单测。适用于复制、下载等任意提示按钮。
 enum CopyButtonTooltip {
     /// 提示与按钮之间的间距。
     static let gap: CGFloat = 6
@@ -31,16 +31,17 @@ enum CopyButtonTooltip {
     }
 }
 
-/// 对勾按钮悬停状态机：跟踪鼠标是否悬停在按钮上，仅在状态变化时返回 true。
-struct CopyButtonHoverState {
-    private(set) var isHovering = false
+/// 工具条图标按钮悬停状态机：跟踪当前悬停的提示文本（支持多个按钮），
+/// 仅在悬停目标变化时返回 true，避免重复刷新提示窗口。
+struct ToolbarHoverState {
+    private(set) var currentTooltip: String?
 
-    /// 更新悬停状态。返回 true 表示状态发生变化（需要刷新提示显示）。
+    /// 更新当前悬停的提示文本。返回 true 表示目标变化（需刷新提示显示）。
+    /// 传入 nil 表示鼠标不在任何提示按钮上。
     @discardableResult
-    mutating func update(point: CGPoint, buttonFrame: CGRect) -> Bool {
-        let now = buttonFrame.contains(point)
-        guard now != isHovering else { return false }
-        isHovering = now
+    mutating func update(matchedTooltip: String?) -> Bool {
+        guard matchedTooltip != currentTooltip else { return false }
+        currentTooltip = matchedTooltip
         return true
     }
 }

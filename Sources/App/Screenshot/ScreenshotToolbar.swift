@@ -19,7 +19,8 @@ final class ScreenshotToolbar: NSWindow {
     weak var toolbarDelegate: ScreenshotToolbarDelegate?
     private var toolButtons: [AnnotationType?: NSButton] = [:]
     private var cornerButton: NSButton?
-    private var colorButtons: [AnnotationColor: NSButton] = [:]
+    private var paletteButton: NSButton?
+    private var colorPanel: NSPanel?
     private var undoButton: NSButton?
     private(set) var selectedColor: AnnotationColor = .red
 
@@ -87,9 +88,11 @@ final class ScreenshotToolbar: NSWindow {
         ub.isBordered = false
         ub.wantsLayer = true
         ub.layer?.cornerRadius = 6
+        ub.title = ""
         ub.target = self
         ub.action = #selector(undoTapped)
         container.addSubview(ub)
+        container.registerTooltipButton(ub, text: "撤销")
         undoButton = ub
         updateUndoButton(canUndo: false)
         x += 4 + btnSize
@@ -101,20 +104,23 @@ final class ScreenshotToolbar: NSWindow {
         container.addSubview(sep)
         x += 8
 
-        // 颜色选择
-        for color in AnnotationColor.allCases {
-            let btn = NSButton(frame: NSRect(x: x, y: y, width: 20, height: 20))
-            btn.wantsLayer = true
-            btn.layer?.cornerRadius = 10
-            btn.layer?.backgroundColor = nsColor(color).cgColor
-            btn.tag = AnnotationColor.allCases.firstIndex(of: color)! + 100
-            btn.action = #selector(colorSelected(_:))
-            btn.target = self
-            btn.isBordered = false
-            container.addSubview(btn)
-            colorButtons[color] = btn
-            x += 24
-        }
+        // 主题颜色按钮：点击弹出颜色选择面板（预设色 + 自定义）
+        let pBtn = NSButton(frame: NSRect(x: x, y: y, width: 28, height: 28))
+        pBtn.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "主题")
+        pBtn.image?.isTemplate = true
+        pBtn.contentTintColor = .white
+        pBtn.isBordered = false
+        pBtn.wantsLayer = true
+        pBtn.layer?.cornerRadius = 6
+        pBtn.layer?.borderWidth = 1
+        pBtn.layer?.borderColor = NSColor.black.withAlphaComponent(0.3).cgColor
+        pBtn.toolTip = "主题"
+        pBtn.target = self
+        pBtn.action = #selector(paletteTapped)
+        container.addSubview(pBtn)
+        container.registerTooltipButton(pBtn, text: "主题")
+        paletteButton = pBtn
+        x += 28
         selectColor(.red)
 
         // 分隔线
@@ -125,25 +131,13 @@ final class ScreenshotToolbar: NSWindow {
         x += 8
 
         // 操作按钮
-        x = addActionButton(container, x: x, y: y, title: "滚动", action: #selector(scrollTapped), color: .systemPurple)
-        x = addActionButton(container, x: x + 4, y: y, title: "保存", action: #selector(saveTapped), color: .systemGreen)
-        x = addActionButton(container, x: x + 4, y: y, title: "贴图", action: #selector(pinTapped), color: .systemOrange)
-        x = addActionButton(container, x: x + 4, y: y, title: "取消", action: #selector(cancelTapped), color: .systemRed)
+        x = addIconButton(container, x: x, y: y, symbol: "arrow.down.to.line", tooltip: "长截图", action: #selector(scrollTapped), bgColor: .systemPurple)
+        x = addIconButton(container, x: x + 4, y: y, symbol: "arrow.down", tooltip: "下载", action: #selector(saveTapped), bgColor: .systemGreen)
+        x = addIconButton(container, x: x + 4, y: y, symbol: "pin", tooltip: "贴图", action: #selector(pinTapped), bgColor: .systemOrange)
+        x = addIconButton(container, x: x + 4, y: y, symbol: "xmark", tooltip: "关闭", action: #selector(cancelTapped), bgColor: .systemRed)
 
-      // 对勾按钮：复制到剪贴板（最常用，放最后方便点击）
-        let copyBtn = NSButton(frame: NSRect(x: x + 6, y: y, width: 28, height: 28))
-       copyBtn.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "复制")
-        copyBtn.image?.isTemplate = true
-        copyBtn.contentTintColor = .white
-        copyBtn.isBordered = false
-        copyBtn.wantsLayer = true
-        copyBtn.layer?.cornerRadius = 6
-        copyBtn.layer?.backgroundColor = NSColor.systemBlue.cgColor
-        copyBtn.toolTip = "复制"
-        copyBtn.target = self
-       copyBtn.action = #selector(copyTapped)
-       container.addSubview(copyBtn)
-        container.copyButton = copyBtn
+        // 对勾按钮：复制到剪贴板（最常用，放最后方便点击）
+        x = addIconButton(container, x: x + 6, y: y, symbol: "checkmark", tooltip: "复制", action: #selector(copyTapped), bgColor: .systemBlue)
     }
 
     private func addToolButton(_ container: NSView, x: CGFloat, y: CGFloat, size: CGFloat,
@@ -164,22 +158,24 @@ final class ScreenshotToolbar: NSWindow {
         return x + size
     }
 
-    private func addActionButton(_ container: NSView, x: CGFloat, y: CGFloat,
-                                  title: String, action: Selector, color: NSColor) -> CGFloat {
-        let btn = NSButton(frame: NSRect(x: x, y: y, width: 52, height: 28))
+    /// 图标按钮（下载/复制等）：无边框图标 + 背景色 + 悬停提示注册。
+    private func addIconButton(_ container: ToolbarContainerView, x: CGFloat, y: CGFloat,
+                                symbol: String, tooltip: String, action: Selector,
+                                bgColor: NSColor) -> CGFloat {
+        let btn = NSButton(frame: NSRect(x: x, y: y, width: 28, height: 28))
+        btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        btn.image?.isTemplate = true
+        btn.contentTintColor = .white
+        btn.isBordered = false
         btn.wantsLayer = true
         btn.layer?.cornerRadius = 6
-        btn.layer?.backgroundColor = color.cgColor
-        btn.isBordered = false
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-            .foregroundColor: NSColor.white
-        ]
-        btn.attributedTitle = NSAttributedString(string: title, attributes: attrs)
+        btn.layer?.backgroundColor = bgColor.cgColor
+        btn.toolTip = tooltip
         btn.target = self
         btn.action = action
         container.addSubview(btn)
-        return x + 52
+        container.registerTooltipButton(btn, text: tooltip)
+        return x + 28
     }
 
     // MARK: 动作
@@ -191,13 +187,141 @@ final class ScreenshotToolbar: NSWindow {
         toolbarDelegate?.toolbarDidSelect(tool: tool)
     }
 
-    @objc private func colorSelected(_ sender: NSButton) {
-        let idx = sender.tag - 100
-        guard AnnotationColor.allCases.indices.contains(idx) else { return }
-        let color = AnnotationColor.allCases[idx]
+    @objc private func paletteTapped() {
+        if colorPanel != nil { closeColorPanel(); return }
+        showColorPanel()
+    }
+
+    private func showColorPanel() {
+        let swatchSize: CGFloat = 28
+        let spacing: CGFloat = 6
+        let count = CGFloat(AnnotationColor.presets.count)
+        let panelWidth = count * swatchSize + (count - 1) * spacing + 16
+        let panelHeight: CGFloat = 68
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = NSColor(white: 0.16, alpha: 0.96)
+        panel.hasShadow = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+        panel.acceptsMouseMovedEvents = true
+
+        let content = NSView(frame: panel.contentView!.bounds)
+        content.wantsLayer = true
+        panel.contentView = content
+
+        var sx: CGFloat = 8
+        let sy: CGFloat = 34
+        for color in AnnotationColor.presets {
+            let swatch = NSButton(frame: NSRect(x: sx, y: sy, width: swatchSize, height: swatchSize))
+            swatch.title = ""
+            swatch.image = nil
+            swatch.wantsLayer = true
+            swatch.layer?.cornerRadius = swatchSize / 2
+            swatch.layer?.backgroundColor = nsColor(color).cgColor
+            swatch.isBordered = false
+            swatch.tag = AnnotationColor.presets.firstIndex(of: color)! + 200
+            swatch.target = self
+            swatch.action = #selector(presetColorSelected(_:))
+            content.addSubview(swatch)
+            sx += swatchSize + spacing
+        }
+
+        let customBtn = NSButton(frame: NSRect(x: 8, y: 6, width: panelWidth - 16, height: 22))
+        customBtn.title = ""
+        customBtn.isBordered = false
+        customBtn.attributedTitle = NSAttributedString(string: "自定义…", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white
+        ])
+        customBtn.alignment = .center
+        customBtn.target = self
+        customBtn.action = #selector(customColorTapped)
+        content.addSubview(customBtn)
+
+        if let btn = paletteButton, let btnWin = btn.window {
+            let btnInWin = btn.superview?.convert(btn.frame, to: nil) ?? btn.frame
+            let origin = btnWin.frame.origin
+            let btnScreen = btnInWin.offsetBy(dx: origin.x, dy: origin.y)
+            let screenFrame = btnWin.screen?.frame ?? NSScreen.main?.frame ?? .zero
+            var px = btnScreen.midX - panelWidth / 2
+            var py = btnScreen.minY - panelHeight - 6
+            if px < screenFrame.minX { px = screenFrame.minX }
+            if px + panelWidth > screenFrame.maxX { px = screenFrame.maxX - panelWidth }
+            if py < screenFrame.minY { py = btnScreen.maxY + 6 }
+            panel.setFrameOrigin(NSPoint(x: px, y: py))
+        }
+
+        panel.orderFrontRegardless()
+        colorPanel = panel
+        updatePaletteSelection()
+    }
+
+    @objc private func presetColorSelected(_ sender: NSButton) {
+        let idx = sender.tag - 200
+        guard AnnotationColor.presets.indices.contains(idx) else { return }
+        let color = AnnotationColor.presets[idx]
         selectColor(color)
-        DiagLog.write("Toolbar.colorSelected: color=\(color)")
-        toolbarDelegate?.toolbarDidSelectColor(AnnotationColor.allCases[idx])
+        DiagLog.write("Toolbar.presetColorSelected: color=\(color)")
+        toolbarDelegate?.toolbarDidSelectColor(color)
+        closeColorPanel()
+    }
+
+    @objc private func customColorTapped() {
+        closeColorPanel()
+        let cp = NSColorPanel.shared
+        cp.showsAlpha = false
+        // 层级必须高于全屏截图覆盖层（screenSaver），否则颜色面板被遮挡看不到
+        cp.level = NSWindow.Level(rawValue: ColorPanelPositioner.panelLevelRaw(
+            overlayLevelRaw: NSWindow.Level.screenSaver.rawValue))
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(colorPanelChanged),
+            name: NSColorPanel.colorDidChangeNotification, object: cp)
+        // 先定位再显示，避免系统重置位置
+        positionColorPanel(cp)
+        cp.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        // 显示后再定位一次，确保位置不被系统覆盖
+        positionColorPanel(cp)
+        DispatchQueue.main.async { [weak self] in
+            self?.positionColorPanel(cp)
+        }
+    }
+
+    private func positionColorPanel(_ cp: NSColorPanel) {
+        guard let btn = paletteButton, let btnWin = btn.window else { return }
+        let btnInWin = btn.superview?.convert(btn.frame, to: nil) ?? btn.frame
+        let origin = btnWin.frame.origin
+        let btnScreen = btnInWin.offsetBy(dx: origin.x, dy: origin.y)
+        let screen = btnWin.screen ?? NSScreen.main ?? NSScreen.screens.first
+        let screenFrame = screen?.frame ?? .zero
+        let pos = ColorPanelPositioner.origin(
+            buttonScreenFrame: btnScreen, screenFrame: screenFrame, panelSize: cp.frame.size)
+        cp.setFrameOrigin(pos)
+    }
+
+    @objc private func colorPanelChanged() {
+        let cp = NSColorPanel.shared
+        let c = cp.color.usingColorSpace(.sRGB) ?? cp.color
+        let custom = AnnotationColor.custom(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent)
+        selectColor(custom)
+        DiagLog.write("Toolbar.colorPanelChanged: custom color selected")
+        toolbarDelegate?.toolbarDidSelectColor(custom)
+    }
+
+    func closeColorPanel() {
+        colorPanel?.orderOut(nil)
+        colorPanel = nil
+    }
+
+    func cleanupColorPanel() {
+        closeColorPanel()
+        NotificationCenter.default.removeObserver(
+            self, name: NSColorPanel.colorDidChangeNotification, object: NSColorPanel.shared)
+        NSColorPanel.shared.close()
     }
 
     @objc private func copyTapped() { toolbarDelegate?.toolbarDidCopy() }
@@ -218,16 +342,23 @@ final class ScreenshotToolbar: NSWindow {
         }
     }
 
-    /// 高亮选中的颜色按钮（白色描边），取消其他颜色按钮的描边。
+    /// 更新当前选中颜色，同步调色板按钮背景色。
     func selectColor(_ color: AnnotationColor) {
         selectedColor = color
-        for (c, btn) in colorButtons {
-            if c == color {
-                btn.layer?.borderWidth = 2.5
-                btn.layer?.borderColor = NSColor.white.cgColor
-            } else {
-                btn.layer?.borderWidth = 0
-            }
+        paletteButton?.layer?.backgroundColor = nsColor(color).cgColor
+        updatePaletteSelection()
+    }
+
+    /// 高亮颜色面板中当前选中的预设色块（白色描边）。
+    private func updatePaletteSelection() {
+        guard let content = colorPanel?.contentView else { return }
+        for sv in content.subviews {
+            guard let btn = sv as? NSButton, btn.tag >= 200 else { continue }
+            let idx = btn.tag - 200
+            guard AnnotationColor.presets.indices.contains(idx) else { continue }
+            let isSelected = AnnotationColor.presets[idx] == selectedColor
+            btn.layer?.borderWidth = isSelected ? 2.5 : 0
+            btn.layer?.borderColor = NSColor.white.cgColor
         }
     }
 
@@ -262,25 +393,24 @@ final class ScreenshotToolbar: NSWindow {
     }
 
     private func nsColor(_ color: AnnotationColor) -> NSColor {
-        switch color {
-        case .red: return .systemRed
-        case .yellow: return .systemYellow
-        case .green: return .systemGreen
-        case .blue: return .systemBlue
-        case .white: return .white
-        case .black: return .black
-        }
+        let rgb = color.rgbComponents
+        return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
     }
 
 }
 
-/// 工具条内容视图：强制显示箭头光标，并管理对勾复制按钮的悬停提示。
+/// 工具条内容视图：强制显示箭头光标，并管理图标按钮的悬停提示。
 /// nonactivatingPanel 下 cursorRect 与 mouseEntered 不可靠，改用 mouseMoved
 /// tracking area（已验证有效）检测悬停，提示用独立小窗口显示避免裁剪。
 final class ToolbarContainerView: NSView {
-    weak var copyButton: NSButton?
-    private var hoverState = CopyButtonHoverState()
+    private var tooltipButtons: [(button: NSButton, text: String)] = []
+    private var hoverState = ToolbarHoverState()
     private var tooltipWindow: NSPanel?
+
+    /// 注册一个图标按钮及其悬停提示文本。
+    func registerTooltipButton(_ button: NSButton, text: String) {
+        tooltipButtons.append((button, text))
+    }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: NSCursor.arrow)
@@ -296,10 +426,10 @@ final class ToolbarContainerView: NSView {
         ))
     }
 
-    /// 鼠标在工具条任意位置（含子视图）移动时强制箭头光标，并更新对勾按钮悬停提示。
+    /// 鼠标在工具条任意位置（含子视图）移动时强制箭头光标，并更新图标按钮悬停提示。
     override func mouseMoved(with event: NSEvent) {
         NSCursor.arrow.set()
-        updateCopyTooltip(with: event)
+        updateTooltip(with: event)
     }
 
     override func cursorUpdate(with event: NSEvent) {
@@ -308,22 +438,24 @@ final class ToolbarContainerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { hideCopyTooltip() }
+        if window == nil { hideTooltip() }
     }
 
-    private func updateCopyTooltip(with event: NSEvent) {
-        guard let button = copyButton else { return }
+    private func updateTooltip(with event: NSEvent) {
+        guard !tooltipButtons.isEmpty else { return }
         let point = convert(event.locationInWindow, from: nil)
-        guard hoverState.update(point: point, buttonFrame: button.frame) else { return }
-        if hoverState.isHovering {
-            showCopyTooltip(for: button)
+        let matched = tooltipButtons.first(where: { $0.button.frame.contains(point) })?.text
+        guard hoverState.update(matchedTooltip: matched) else { return }
+        if let text = hoverState.currentTooltip,
+           let button = tooltipButtons.first(where: { $0.text == text })?.button {
+            showTooltip(text: text, for: button)
         } else {
-            hideCopyTooltip()
+            hideTooltip()
         }
     }
 
-   private func showCopyTooltip(for button: NSButton) {
-       hideCopyTooltip()
+    private func showTooltip(text: String, for button: NSButton) {
+        hideTooltip()
         let font = NSFont.labelFont(ofSize: 12)
         let labelSize = CGSize(width: 28, height: 16)
         let buttonInWindow = button.superview?.convert(button.frame, to: nil) ?? button.frame
@@ -343,7 +475,7 @@ final class ToolbarContainerView: NSView {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovable = false
 
-        let label = NSTextField(labelWithString: "复制")
+        let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = .white
         label.alignment = .center
@@ -358,7 +490,7 @@ final class ToolbarContainerView: NSView {
         tooltipWindow = panel
     }
 
-    private func hideCopyTooltip() {
+    private func hideTooltip() {
         tooltipWindow?.orderOut(nil)
         tooltipWindow = nil
     }
