@@ -1,61 +1,79 @@
 import XCTest
 import CoreGraphics
 
-/// TDD: 滚动截图拼接器 - 检测两帧之间的垂直重叠并拼接。
+/// TDD: 滚动截图拼接器 - 检测向下滚动时相邻帧的重叠并拼接。
 final class ScrollStitcherTests: XCTestCase {
 
-    func test_findOverlap_stripedImages() {
-        // A: 上半红、下半蓝；B: 上半蓝、下半绿 -> 重叠=蓝部分=50行
-        let a = makeStripedImage(stripeColors: [.red, .blue], totalHeight: 100)
-        let b = makeStripedImage(stripeColors: [.blue, .green], totalHeight: 100)
-        let overlap = ScrollStitcher.findOverlap(top: a, bottom: b)
-        XCTAssertEqual(overlap, 50)
+    /// 向下滚动：A 底部=蓝、B 顶部=蓝 -> 重叠=50（精确匹配）
+    func test_findOverlap_scrollDown() {
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImage(stripeColors: [.green, .blue], totalHeight: 100)
+        XCTAssertEqual(ScrollStitcher.findOverlap(top: a, bottom: b), 50)
     }
 
     func test_findOverlap_noOverlap() {
-        // A: 全红；B: 全蓝 -> 无重叠
         let a = makeStripedImage(stripeColors: [.red], totalHeight: 60)
         let b = makeStripedImage(stripeColors: [.blue], totalHeight: 60)
-        let overlap = ScrollStitcher.findOverlap(top: a, bottom: b)
-        XCTAssertEqual(overlap, 0)
+        XCTAssertEqual(ScrollStitcher.findOverlap(top: a, bottom: b), 0)
     }
 
     func test_findOverlap_identicalImages() {
-        let a = makeStripedImage(stripeColors: [.red, .blue], totalHeight: 80)
-        let overlap = ScrollStitcher.findOverlap(top: a, bottom: a)
-        XCTAssertEqual(overlap, 80)
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 80)
+        XCTAssertEqual(ScrollStitcher.findOverlap(top: a, bottom: a), 80)
     }
 
     func test_stitch_twoImages() {
-        let a = makeStripedImage(stripeColors: [.red, .blue], totalHeight: 100)
-        let b = makeStripedImage(stripeColors: [.blue, .green], totalHeight: 100)
-        let stitched = ScrollStitcher.stitch(images: [a, b])
-        // 100 + 100 - 50(重叠) = 150
-        XCTAssertEqual(stitched!.height, 150)
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImage(stripeColors: [.green, .blue], totalHeight: 100)
+        XCTAssertEqual(ScrollStitcher.stitch(images: [a, b])!.height, 150)
     }
 
     func test_stitch_threeImages() {
-        let a = makeStripedImage(stripeColors: [.red, .blue], totalHeight: 100)
-        let b = makeStripedImage(stripeColors: [.blue, .green], totalHeight: 100)
-        let c = makeStripedImage(stripeColors: [.green, .yellow], totalHeight: 100)
-        let stitched = ScrollStitcher.stitch(images: [a, b, c])
-        // 100 + (100-50) + (100-50) = 200
-        XCTAssertEqual(stitched!.height, 200)
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImage(stripeColors: [.green, .blue], totalHeight: 100)
+        let c = makeStripedImage(stripeColors: [.yellow, .green], totalHeight: 100)
+        XCTAssertEqual(ScrollStitcher.stitch(images: [a, b, c])!.height, 200)
     }
 
     func test_stitch_singleImage_returnsSame() {
         let a = makeStripedImage(stripeColors: [.red], totalHeight: 50)
-        let stitched = ScrollStitcher.stitch(images: [a])
-        XCTAssertEqual(stitched!.height, 50)
+        XCTAssertEqual(ScrollStitcher.stitch(images: [a])!.height, 50)
     }
 
     func test_stitch_emptyReturnsNil() {
         XCTAssertNil(ScrollStitcher.stitch(images: []))
     }
 
+    // MARK: - 容差：轻微像素偏差（容错匹配，允许 ±5 行误差）
+
+    func test_findOverlap_withSlightNoise_detectsOverlap() {
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImage(stripeColors: [.green, NSColor(srgbRed: 0, green: 0, blue: 245/255, alpha: 1)], totalHeight: 100)
+        XCTAssertEqual(ScrollStitcher.findOverlap(top: a, bottom: b), 50, accuracy: 5)
+    }
+
+    func test_stitch_withSlightNoise_noDuplicateContent() {
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImage(stripeColors: [.green, NSColor(srgbRed: 0, green: 0, blue: 245/255, alpha: 1)], totalHeight: 100)
+        XCTAssertEqual(ScrollStitcher.stitch(images: [a, b])!.height, 150, accuracy: 10)
+    }
+
+    // MARK: - 容差：单行差异（光标/滚动条，容错匹配）
+
+    func test_findOverlap_withOneMismatchedRow_stillDetects() {
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImageWithBadRow(stripeColors: [.green, .blue], totalHeight: 100, badRow: 10, badColor: .green)
+        XCTAssertEqual(ScrollStitcher.findOverlap(top: a, bottom: b), 50, accuracy: 5)
+    }
+
+    func test_stitch_withMinorDifferences_noDuplicateContent() {
+        let a = makeStripedImage(stripeColors: [.blue, .red], totalHeight: 100)
+        let b = makeStripedImageWithBadRow(stripeColors: [.green, .blue], totalHeight: 100, badRow: 10, badColor: .green)
+        XCTAssertEqual(ScrollStitcher.stitch(images: [a, b])!.height, 150, accuracy: 10)
+    }
+
     // MARK: - Helpers
 
-    /// 创建水平条纹图片（CGContext 原点在左下，条纹按从下到上排列）。
     private func makeStripedImage(stripeColors: [NSColor], totalHeight: Int, width: Int = 100) -> CGImage {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let ctx = CGContext(data: nil, width: width, height: totalHeight,
@@ -66,6 +84,21 @@ final class ScrollStitcherTests: XCTestCase {
             ctx.setFillColor(color.cgColor)
             ctx.fill(CGRect(x: 0, y: i * stripeHeight, width: width, height: stripeHeight))
         }
+        return ctx.makeImage()!
+    }
+
+    private func makeStripedImageWithBadRow(stripeColors: [NSColor], totalHeight: Int, badRow: Int, badColor: NSColor, width: Int = 100) -> CGImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let ctx = CGContext(data: nil, width: width, height: totalHeight,
+                            bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let stripeHeight = totalHeight / stripeColors.count
+        for (i, color) in stripeColors.enumerated() {
+            ctx.setFillColor(color.cgColor)
+            ctx.fill(CGRect(x: 0, y: i * stripeHeight, width: width, height: stripeHeight))
+        }
+        ctx.setFillColor(badColor.cgColor)
+        ctx.fill(CGRect(x: 0, y: totalHeight - 1 - badRow, width: width, height: 1))
         return ctx.makeImage()!
     }
 }

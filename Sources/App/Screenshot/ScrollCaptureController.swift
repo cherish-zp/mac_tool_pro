@@ -1,89 +1,73 @@
 import AppKit
 import CoreGraphics
 
-/// 滚动截图控制器：隐藏覆盖层后，反复滚动 + 截取选区，最后用 ScrollStitcher 拼成长图。
+/// 滚动截图控制器：管理截帧、去重、拼接。
+/// 支持自动/手动两种滚动模式，由 ScrollCaptureSession 状态机驱动。
 final class ScrollCaptureController {
 
     private let config = ScreenshotConfig()
-    private let maxFrames = 15
-    private let scrollDelay: TimeInterval = 0.25
-    private let scrollPixels: Int = 200
+    private var session = ScrollCaptureSession(maxFrames: 30)
+    private let displayID: CGDirectDisplayID
+    private let captureRect: CGRect
+    private let scaleFactor: CGFloat
+    /// 截帧时要排除的窗口 ID（选区边框窗口）。
+    var excludeWindowID: CGWindowID?
 
-    /// 执行滚动截图。
-    /// - Parameters:
-    ///   - displayID: 目标显示器 ID。
-    ///   - rect: 选区（全局屏幕坐标，左上原点）。
-    ///   - completion: 完成回调，返回拼接后的长图。
-    func capture(displayID: CGDirectDisplayID, rect: CGRect, completion: @escaping (NSImage?) -> Void) {
-        let captureRect = CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.width, height: rect.height)
-        var frames: [CGImage] = []
-
-        func captureFrame() -> CGImage? {
-            return CGDisplayCreateImage(displayID, rect: captureRect)
-        }
-
-        func scrollOnce() {
-            // 向下滚动 scrollPixels 像素（负值 = 向下滚）
-            for _ in stride(from: 0, to: scrollPixels, by: 40) {
-                if let event = CGEvent(scrollWheelEvent2Source: nil,
-                                       units: CGScrollEventUnit.pixel,
-                                       wheelCount: 1,
-                                       wheel1: -40, wheel2: 0, wheel3: 0) {
-                    event.post(tap: CGEventTapLocation.cghidEventTap)
-                }
-            }
-        }
-
-        // 采集第 0 帧
-        guard let firstFrame = captureFrame() else {
-            DispatchQueue.main.async { completion(nil) }
-            return
-        }
-        frames.append(firstFrame)
-
-        // 逐帧滚动 + 截取
-        let group = DispatchGroup()
-        for i in 1..<maxFrames {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                scrollOnce()
-                Thread.sleep(forTimeInterval: self.scrollDelay)
-                if let frame = captureFrame() {
-                    // 判断是否已到底部：与上一帧完全相同则停止
-                    if frame !== frames.last, ScrollStitcher.contentChanged(top: frames.last!, bottom: frame) {
-                        frames.append(frame)
-                    }
-                }
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) {
-            guard frames.count > 1, let stitched = ScrollStitcher.stitch(images: frames) else {
-                completion(nil)
-                return
-            }
-            // 像素尺寸 -> 点尺寸，避免贴图变形（同 renderFinalImage 修复）
-            let scaleFactor = rect.width > 0 ? CGFloat(firstFrame.width) / rect.width : 1
-            let displaySize = SelectionRect.pointSize(
-                pixelSize: CGSize(width: stitched.width, height: stitched.height),
-                scaleFactor: scaleFactor
-            )
-            let image = NSImage(cgImage: stitched, size: displaySize)
-            self.saveAndCopy(image: image)
-            completion(image)
-        }
+    init(displayID: CGDirectDisplayID, captureRect: CGRect, scaleFactor: CGFloat) {
+        self.displayID = displayID
+        self.captureRect = captureRect
+        self.scaleFactor = scaleFactor
     }
 
-    /// 判断两帧是否有变化（委托给 ScrollStitcher.contentChanged）。
+    var frameCount: Int { session.count }
+    var state: ScrollCaptureSession.State { session.state }
+    var mode: ScrollCaptureSession.Mode? { session.mode }
+    var isDone: Bool { session.isDone }
 
-    private func saveAndCopy(image: NSImage) {
-        // 复制到剪贴板
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects([image])
+    /// 开始自动滚动截取。
+    func startAuto() { session.startAuto() }
 
-        // 保存到文件
+    /// 开始手动滚动截取（鼠标滚动触发）。
+    func startManual() { session.startManual() }
+
+    /// 停止截取。
+    func stop() { session.stop() }
+
+    /// 截取当前选区帧，内容变化时加入序列。返回是否实际加入。
+    @discardableResult
+    func captureFrame() -> Bool {
+        let frame: CGImage?
+        if let excludeID = excludeWindowID {
+            let bounds = CGDisplayBounds(displayID)
+            let globalRect = ScrollCaptureSession.globalCaptureRect(
+                displayRect: captureRect, displayBounds: bounds)
+            frame = CGWindowListCreateImage(globalRect, .optionOnScreenBelowWindow, excludeID, [.bestResolution])
+        } else {
+            frame = CGDisplayCreateImage(displayID, rect: captureRect)
+        }
+        guard let img = frame else { return false }
+        return session.tryAdd(img)
+    }
+
+    /// 拼接所有帧为长图（纯拼接，无副作用）。
+    func stitch() -> NSImage? {
+        guard !session.frames.isEmpty else { return nil }
+        let stitched: CGImage?
+        if session.frames.count > 1 {
+            stitched = ScrollStitcher.stitch(images: session.frames)
+        } else {
+            stitched = session.frames.first
+        }
+        guard let result = stitched else { return nil }
+        let displaySize = SelectionRect.pointSize(
+            pixelSize: CGSize(width: result.width, height: result.height),
+            scaleFactor: scaleFactor
+        )
+        return NSImage(cgImage: result, size: displaySize)
+    }
+
+    /// 保存图片到文件。
+    func saveToFile(image: NSImage) {
         let dir = config.saveDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []

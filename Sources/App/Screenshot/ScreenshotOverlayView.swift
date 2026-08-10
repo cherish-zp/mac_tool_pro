@@ -195,6 +195,17 @@ final class ScreenshotOverlayView: NSView {
             guard annotation.points.count >= 2 else { break }
             let rect = SelectionRect.normalize(start: annotation.points[0], end: annotation.points[1])
             drawMosaic(in: rect, ctx: ctx)
+        case .pen:
+            guard annotation.points.count >= 2 else { break }
+            ctx.setStrokeColor(color.cgColor)
+            ctx.setLineWidth(annotation.strokeWidth)
+            ctx.setLineCap(.round)
+            ctx.setLineJoin(.round)
+            ctx.move(to: annotation.points[0])
+            for i in 1..<annotation.points.count {
+                ctx.addLine(to: annotation.points[i])
+            }
+            ctx.strokePath()
         }
         ctx.restoreGState()
     }
@@ -394,6 +405,8 @@ final class ScreenshotOverlayView: NSView {
         let local = CGPoint(x: point.x - sel.origin.x, y: point.y - sel.origin.y)
         if tool == .text {
             startTextEditing(at: point, localPoint: local)
+        } else if tool == .pen {
+            drawingAnnotation = Annotation(type: .pen, points: [local], color: currentColor, strokeWidth: strokeWidth)
         } else {
             drawingAnnotation = Annotation(type: tool, points: [local, local], color: currentColor, strokeWidth: strokeWidth)
         }
@@ -420,7 +433,11 @@ final class ScreenshotOverlayView: NSView {
         guard let sel = selectionRect else { return }
         let local = CGPoint(x: point.x - sel.origin.x, y: point.y - sel.origin.y)
         guard var d = drawingAnnotation, d.type != .text else { return }
-        d.points[d.points.count - 1] = local
+        if d.type == .pen {
+            PenPathBuilder.append(local, to: &d.points)
+        } else {
+            d.points[d.points.count - 1] = local
+        }
         drawingAnnotation = d
         needsDisplay = true
     }

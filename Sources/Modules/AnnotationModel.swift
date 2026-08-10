@@ -1,12 +1,13 @@
 import CoreGraphics
 import Foundation
 
-/// 标注类型：矩形、箭头、文字、马赛克。
+/// 标注类型：矩形、箭头、文字、马赛克、画笔。
 public enum AnnotationType: String, Codable, CaseIterable {
     case rectangle
     case arrow
     case text
     case mosaic
+    case pen
 }
 
 /// 标注颜色：预设调色板 + 自定义 RGB 颜色。
@@ -36,6 +37,7 @@ public enum AnnotationColor: Codable, Equatable, Hashable {
 /// - 箭头：points[0]=起点, points[1]=终点
 /// - 文字：points[0]=左上角定位点，text 存内容
 /// - 马赛克：points[0]=origin, points[1]=对角点
+/// - 画笔：points 为自由绘制路径点序列（多点）
 public struct Annotation: Codable, Equatable, Identifiable {
     public let id: UUID
     public var type: AnnotationType

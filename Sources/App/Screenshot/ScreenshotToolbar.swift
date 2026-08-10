@@ -59,10 +59,10 @@ final class ScreenshotToolbar: NSWindow {
         x = addToolButton(container, x: x, y: y, size: btnSize, tool: nil, symbol: "cursorarrow")
 
         // 标注工具
-        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .rectangle, symbol: "square")
-        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .arrow, symbol: "arrow.up.right")
-        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .text, symbol: "textformat")
-        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .mosaic, symbol: "square.dashed")
+        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .rectangle, symbol: "square", tooltip: "形状")
+        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .arrow, symbol: "arrow.up.right", tooltip: "箭头")
+        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .text, symbol: "textformat", tooltip: "文案")
+        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .mosaic, symbol: "square.dashed", tooltip: "马赛克")
 
         // 圆角按钮（切换选区圆角半径）
         let cb = NSButton(frame: NSRect(x: x + 6, y: y, width: 40, height: btnSize))
@@ -74,9 +74,11 @@ final class ScreenshotToolbar: NSWindow {
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.white
         ])
+        cb.title = ""
         cb.target = self
         cb.action = #selector(cornerTapped)
         container.addSubview(cb)
+        container.registerTooltipButton(cb, text: "圆角")
        cornerButton = cb
        x += 6 + 40
 
@@ -123,6 +125,9 @@ final class ScreenshotToolbar: NSWindow {
         x += 28
         selectColor(.red)
 
+        // 画笔工具：自由绘制路径
+        x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .pen, symbol: "paintbrush", tooltip: "画笔")
+
         // 分隔线
         x += 4
         let sep2 = NSBox(frame: NSRect(x: x, y: 6, width: 1, height: 32))
@@ -141,7 +146,7 @@ final class ScreenshotToolbar: NSWindow {
     }
 
     private func addToolButton(_ container: NSView, x: CGFloat, y: CGFloat, size: CGFloat,
-                               tool: AnnotationType?, symbol: String) -> CGFloat {
+                               tool: AnnotationType?, symbol: String, tooltip: String? = nil) -> CGFloat {
         let btn = NSButton(frame: NSRect(x: x, y: y, width: size, height: size))
         btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         btn.image?.isTemplate = true
@@ -151,8 +156,12 @@ final class ScreenshotToolbar: NSWindow {
         btn.layer?.cornerRadius = 6
         btn.target = self
         btn.action = #selector(toolSelected(_:))
+        btn.title = ""
         btn.tag = toolTag(tool)
         container.addSubview(btn)
+        if let tooltip = tooltip, let tc = container as? ToolbarContainerView {
+            tc.registerTooltipButton(btn, text: tooltip)
+        }
         toolButtons[tool] = btn
         selectTool(tool)
         return x + size
@@ -324,6 +333,11 @@ final class ScreenshotToolbar: NSWindow {
         NSColorPanel.shared.close()
     }
 
+    /// 隐藏所有悬停提示窗口（截帧前调用，避免提示文字被截入画面）。
+    func hideTooltips() {
+        (contentView as? ToolbarContainerView)?.hideTooltip()
+    }
+
     @objc private func copyTapped() { toolbarDelegate?.toolbarDidCopy() }
     @objc private func saveTapped() { toolbarDelegate?.toolbarDidSave() }
     @objc private func pinTapped() { toolbarDelegate?.toolbarDidPin() }
@@ -490,7 +504,7 @@ final class ToolbarContainerView: NSView {
         tooltipWindow = panel
     }
 
-    private func hideTooltip() {
+    func hideTooltip() {
         tooltipWindow?.orderOut(nil)
         tooltipWindow = nil
     }

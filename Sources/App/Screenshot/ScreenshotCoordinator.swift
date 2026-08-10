@@ -14,6 +14,18 @@ final class ScreenshotCoordinator {
     private var escMonitor: Any?
     /// 选区超时定时器：覆盖层显示后若用户长时间未操作（如全屏下覆盖层不可见），自动清理。
     private var idleTimeoutTimer: Timer?
+    private var scrollController: ScrollCaptureController?
+    private var scrollBorderWindow: NSPanel?
+    private var scrollToolbar: NSPanel?
+    private var scrollFrameLabel: NSTextField?
+    private var scrollModeLabel: NSTextField?
+    private var scrollStartButton: NSButton?
+    /// 滚轮事件监听（CGEventTap，listenOnly），检测手动滚动。
+    private var scrollEventTap: CFMachPort?
+    /// 自动滚动定时器：发送合成滚轮事件 + 截帧。
+    private var scrollAutoTimer: Timer?
+    /// 手动滚动截帧防抖（延迟截取，等内容滚动完成）。
+    private var scrollCaptureWorkItem: DispatchWorkItem?
 
     /// 截图会话结束时回调（用于重置 ScreenshotSession 状态）。
     var onFinished: (() -> Void)?
@@ -356,6 +368,7 @@ final class ScreenshotCoordinator {
 
     /// 结束截图会话：关闭所有覆盖层窗口、工具条，移除事件监听，恢复 App 策略。
     func finish() {
+        cleanupScrollCapture()
         cancelIdleTimeout()
         for w in overlayWindows { w.orderOut(nil) }
         toolbar?.cleanupColorPanel()
@@ -433,32 +446,322 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
     func toolbarDidPin() { pinToDesktop(); finish() }
     func toolbarDidCancel() { cancel() }
 
-    func toolbarDidScroll() {
+func toolbarDidScroll() {
         guard let overlay = activeOverlay, let sel = selectionRect else { return }
         let screen = overlay.screen ?? NSScreen.main!
         let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? CGMainDisplayID()
-        for w in overlayWindows { w.orderOut(nil) }
+        let captureRect = ScrollCaptureSession.displayCaptureRect(viewRect: sel, screenHeight: screen.frame.height)
+        let scaleFactor = screen.backingScaleFactor
+
+        let controller = ScrollCaptureController(displayID: displayID, captureRect: captureRect, scaleFactor: scaleFactor)
+        scrollController = controller
+
+        // 隐藏所有自身 UI（悬停提示、工具条、覆盖层）
+        toolbar?.hideTooltips()
         toolbar?.cleanupColorPanel()
         toolbar?.orderOut(nil)
+        for w in overlayWindows { w.orderOut(nil) }
 
-        let controller = ScrollCaptureController()
-        controller.capture(displayID: displayID, rect: sel) { [weak self] image in
-            DispatchQueue.main.async {
-                if let image = image {
-                    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                        self?.finish(); return
-                    }
-                    let pinPoint = CGPoint(x: sel.origin.x, y: sel.origin.y)
-                    let pin = PinWindow(cgImage: cgImage, displaySize: image.size, at: pinPoint)
-                    pin.onClose = { [weak self, weak pin] in
-                        guard let pin = pin else { return }
-                        self?.pinWindows.removeAll { $0 === pin }
-                    }
-                    pin.makeKeyAndOrderFront(nil)
-                    self?.pinWindows.append(pin)
-                }
-                self?.finish()
+        // 显示选区边框 + 长截图专用工具栏
+        showScrollBorder(sel: sel, screen: screen)
+        showScrollToolbar(sel: sel, screen: screen)
+        if let borderID = scrollBorderWindow?.windowNumber {
+            controller.excludeWindowID = CGWindowID(borderID)
+        }
+
+        // 启动滚轮事件监听：鼠标滚动自动触发手动模式
+        startScrollEventMonitor()
+        DiagLog.write("Scroll capture ready: waiting for start(auto) or scroll(manual)")
+    }
+
+    // MARK: - 滚轮事件监听（手动模式）
+
+    private func startScrollEventMonitor() {
+        let eventMask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: { _, _, event, refcon in
+                guard let refcon = refcon else { return Unmanaged.passRetained(event) }
+                let coordinator = Unmanaged<ScreenshotCoordinator>.fromOpaque(refcon).takeUnretainedValue()
+                coordinator.onScrollEventDetected()
+                return Unmanaged.passRetained(event)
+            },
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            DiagLog.write("Scroll event tap creation failed (accessibility?)")
+            return
+        }
+        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        scrollEventTap = tap
+        DiagLog.write("Scroll event monitor started")
+    }
+
+    /// 滚轮事件回调：ready 状态下启动手动模式并截帧；manual 模式下截后续帧。
+    private func onScrollEventDetected() {
+        guard let controller = scrollController else { return }
+        if controller.state == .ready {
+            controller.startManual()
+            updateScrollUI()
+            captureScrollFrame()
+        } else if controller.state == .capturing && controller.mode == .manual {
+            captureScrollFrame()
+        }
+    }
+
+    // MARK: - 截帧（防抖）
+
+    /// 延迟 60ms 截帧，等内容滚动完成；连续滚动自动防抖。
+    private func captureScrollFrame() {
+        scrollCaptureWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, let controller = self.scrollController else { return }
+            guard controller.state == .capturing else { return }
+            let added = controller.captureFrame()
+            if added {
+                DispatchQueue.main.async { self.updateScrollUI() }
+            }
+            if controller.isDone {
+                DispatchQueue.main.async { self.finishScrollCapture() }
             }
         }
+        scrollCaptureWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: workItem)
+    }
+
+    // MARK: - 工具栏按钮动作
+
+    /// 开始按钮：启动自动滚动模式。
+    @objc private func onScrollStartPressed() {
+        guard let controller = scrollController, controller.state == .ready else { return }
+        controller.startAuto()
+        controller.captureFrame()
+        updateScrollUI()
+        scrollStartButton?.isEnabled = false
+        startAutoScroll()
+        DiagLog.write("Scroll capture auto mode started")
+    }
+
+    /// 自动滚动定时器：每 300ms 发送滚轮事件 + 截帧。
+    private func startAutoScroll() {
+        scrollAutoTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            guard let self = self, let controller = self.scrollController else { return }
+            guard controller.state == .capturing else { return }
+            let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                wheelCount: 1, wheel1: ScrollCaptureSession.autoScrollDelta, wheel2: 0, wheel3: 0)
+            event?.post(tap: .cghidEventTap)
+            self.captureScrollFrame()
+        }
+    }
+
+    /// 停止按钮：停止截取、拼接、贴图。
+    @objc private func onScrollStopPressed() {
+        finishScrollCapture()
+    }
+
+    /// 复制按钮：停止截取、拼接、复制到剪贴板。
+    @objc private func onScrollCopyPressed() {
+        guard let controller = scrollController else { return }
+        controller.stop()
+        let image = controller.stitch()
+        cleanupScrollCapture()
+        if let image = image {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.writeObjects([image])
+            DiagLog.write("Scroll capture copied to clipboard")
+        }
+        finish()
+    }
+
+    /// 取消按钮。
+    @objc private func onScrollCancelPressed() {
+        cleanupScrollCapture()
+        finish()
+    }
+
+    // MARK: - 完成 & 清理
+
+    @objc private func finishScrollCapture() {
+        guard let controller = scrollController else { return }
+        controller.stop()
+        let image = controller.stitch()
+        let sel = selectionRect
+        cleanupScrollCapture()
+        if let image = image, let sel = sel {
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                finish(); return
+            }
+            let pin = PinWindow(cgImage: cgImage, displaySize: image.size,
+                                at: CGPoint(x: sel.origin.x, y: sel.origin.y))
+            pin.onClose = { [weak self, weak pin] in
+                guard let pin = pin else { return }
+                self?.pinWindows.removeAll { $0 === pin }
+            }
+            pin.makeKeyAndOrderFront(nil)
+            pinWindows.append(pin)
+            DiagLog.write("Scroll capture pinned: frames=\(controller.frameCount)")
+        }
+        finish()
+    }
+
+    private func cleanupScrollCapture() {
+        scrollAutoTimer?.invalidate()
+        scrollAutoTimer = nil
+        scrollCaptureWorkItem?.cancel()
+        scrollCaptureWorkItem = nil
+        if let tap = scrollEventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            scrollEventTap = nil
+        }
+        scrollBorderWindow?.orderOut(nil)
+        scrollBorderWindow = nil
+        scrollToolbar?.orderOut(nil)
+        scrollToolbar = nil
+        scrollFrameLabel = nil
+        scrollModeLabel = nil
+        scrollStartButton = nil
+        scrollController = nil
+    }
+
+    // MARK: - UI
+
+    private func updateScrollUI() {
+        guard let controller = scrollController else { return }
+        scrollFrameLabel?.stringValue = "已截取 \(controller.frameCount) 帧"
+        let modeText: String
+        switch controller.mode {
+        case .auto: modeText = "自动滚动"
+        case .manual: modeText = "手动滚动"
+        case nil: modeText = "等待中"
+        }
+        scrollModeLabel?.stringValue = modeText
+    }
+
+    private func showScrollToolbar(sel: CGRect, screen: NSScreen) {
+        let panelWidth: CGFloat = 380
+        let panelHeight: CGFloat = 44
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = NSColor(white: 0.16, alpha: 0.96)
+        panel.hasShadow = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+
+        let content = NSView(frame: panel.contentView!.bounds)
+        content.wantsLayer = true
+        panel.contentView = content
+
+        var x: CGFloat = 12
+        let y: CGFloat = 8
+        let btnSize: CGFloat = 28
+
+        // 模式标签
+        let modeLabel = NSTextField(labelWithString: "等待中")
+        modeLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        modeLabel.textColor = .white
+        modeLabel.sizeToFit()
+        modeLabel.frame.origin = NSPoint(x: x, y: 15)
+        content.addSubview(modeLabel)
+        x += modeLabel.frame.width + 8
+        scrollModeLabel = modeLabel
+
+        // 帧数标签
+        let frameLabel = NSTextField(labelWithString: "已截取 0 帧")
+        frameLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        frameLabel.textColor = NSColor(white: 0.7, alpha: 1)
+        frameLabel.sizeToFit()
+        frameLabel.frame.origin = NSPoint(x: x, y: 15)
+        content.addSubview(frameLabel)
+        x += frameLabel.frame.width + 12
+        scrollFrameLabel = frameLabel
+
+        // 分隔线
+        x = addScrollSeparator(content, x: x, height: panelHeight)
+
+        // 开始按钮（自动滚动）
+        x = addScrollButton(content, x: x, y: y, size: btnSize, symbol: "play.fill",
+                            bgColor: .systemGreen, action: #selector(onScrollStartPressed),
+                            tag: 1)
+        // 停止按钮
+        x = addScrollButton(content, x: x + 4, y: y, size: btnSize, symbol: "stop.fill",
+                            bgColor: .systemOrange, action: #selector(onScrollStopPressed),
+                            tag: 2)
+        // 复制按钮
+        x = addScrollButton(content, x: x + 4, y: y, size: btnSize, symbol: "checkmark",
+                            bgColor: .systemBlue, action: #selector(onScrollCopyPressed),
+                            tag: 3)
+        // 取消按钮
+        x = addScrollButton(content, x: x + 8, y: y, size: btnSize, symbol: "xmark",
+                            bgColor: .systemRed, action: #selector(onScrollCancelPressed),
+                            tag: 4)
+
+        // 定位工具栏：选区下方优先，放不下则上方
+        let screenFrame = screen.frame
+        var px = sel.midX - panelWidth / 2 + screenFrame.origin.x
+        var py = sel.minY - panelHeight - 8 + screenFrame.origin.y
+        if py < screenFrame.minY { py = sel.maxY + 8 + screenFrame.origin.y }
+        px = max(screenFrame.minX, min(px, screenFrame.maxX - panelWidth))
+        py = max(screenFrame.minY, min(py, screenFrame.maxY - panelHeight))
+        panel.setFrameOrigin(NSPoint(x: px, y: py))
+        panel.orderFrontRegardless()
+        scrollToolbar = panel
+
+        // 记录开始按钮引用
+        if let btn = content.viewWithTag(1) as? NSButton { scrollStartButton = btn }
+    }
+
+    @discardableResult
+    private func addScrollButton(_ container: NSView, x: CGFloat, y: CGFloat, size: CGFloat,
+                                 symbol: String, bgColor: NSColor, action: Selector, tag: Int) -> CGFloat {
+        let btn = NSButton(frame: NSRect(x: x, y: y, width: size, height: size))
+        btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        btn.image?.isTemplate = true
+        btn.contentTintColor = .white
+        btn.isBordered = false
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 6
+        btn.layer?.backgroundColor = bgColor.cgColor
+        btn.target = self
+        btn.action = action
+        btn.tag = tag
+        container.addSubview(btn)
+        return x + size
+    }
+
+    @discardableResult
+    private func addScrollSeparator(_ container: NSView, x: CGFloat, height: CGFloat) -> CGFloat {
+        let sep = NSBox(frame: NSRect(x: x, y: 6, width: 1, height: height - 12))
+        sep.boxType = .separator
+        container.addSubview(sep)
+        return x + 8
+    }
+
+    private func showScrollBorder(sel: CGRect, screen: NSScreen) {
+        let globalRect = CGRect(x: screen.frame.origin.x + sel.origin.x,
+                                y: screen.frame.origin.y + sel.origin.y,
+                                width: sel.width, height: sel.height)
+        let panel = NSPanel(contentRect: globalRect,
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+        panel.ignoresMouseEvents = true
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.borderWidth = 2
+        panel.contentView?.layer?.borderColor = NSColor.systemBlue.cgColor
+        panel.orderFrontRegardless()
+        scrollBorderWindow = panel
     }
 }
