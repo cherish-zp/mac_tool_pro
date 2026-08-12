@@ -5,7 +5,10 @@ protocol ScreenshotToolbarDelegate: AnyObject {
     func toolbarDidSelect(tool: AnnotationType?)
     func toolbarDidSelectColor(_ color: AnnotationColor)
     func toolbarDidToggleCornerRadius()
+    func toolbarDidToggleShadow()
+    func toolbarDidSetShadowOpacity(_ opacity: CGFloat)
     func toolbarDidUndo()
+    func toolbarDidRequestOCR()
     func toolbarDidCopy()
     func toolbarDidSave()
     func toolbarDidPin()
@@ -19,13 +22,19 @@ final class ScreenshotToolbar: NSWindow {
     weak var toolbarDelegate: ScreenshotToolbarDelegate?
     private var toolButtons: [AnnotationType?: NSButton] = [:]
     private var cornerButton: NSButton?
+    private var canvasButton: NSButton?
+    private var canvasPanel: NSPanel?
+    private var morePanel: NSPanel?
+    private var shadowToggleButton: NSButton?
+    private var shadowSlider: NSSlider?
+    private var shadowLabel: NSTextField?
     private var paletteButton: NSButton?
     private var colorPanel: NSPanel?
     private var undoButton: NSButton?
     private(set) var selectedColor: AnnotationColor = .red
 
     init() {
-        let frame = NSRect(x: 0, y: 0, width: 690, height: 44)
+        let frame = NSRect(x: 0, y: 0, width: 690, height: 48)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel],
@@ -35,7 +44,7 @@ final class ScreenshotToolbar: NSWindow {
         // 工具条层级高于覆盖层(screenSaver)，防止用户点覆盖层画图时覆盖层置顶遮住工具条
         self.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
         self.isOpaque = false
-        self.backgroundColor = NSColor(calibratedRed: 0.16, green: 0.16, blue: 0.18, alpha: 0.96)
+        self.backgroundColor = .clear
         self.hasShadow = true
         self.isMovable = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -49,10 +58,15 @@ final class ScreenshotToolbar: NSWindow {
         let container = ToolbarContainerView(frame: contentView!.bounds)
         container.wantsLayer = true
         container.autoresizingMask = [.width, .height]
+        container.layer?.cornerRadius = 12
+        container.layer?.masksToBounds = true
+        container.layer?.backgroundColor = NSColor(srgbRed: 0.89, green: 0.89, blue: 0.89, alpha: 0.98).cgColor
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor.black.withAlphaComponent(0.06).cgColor
         contentView = container
 
         var x: CGFloat = 8
-        let y: CGFloat = 8
+        let y: CGFloat = 10
         let btnSize: CGFloat = 28
 
         // 选择工具（无标注）
@@ -64,29 +78,27 @@ final class ScreenshotToolbar: NSWindow {
         x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .text, symbol: "textformat", tooltip: "文案")
         x = addToolButton(container, x: x + 4, y: y, size: btnSize, tool: .mosaic, symbol: "square.dashed", tooltip: "马赛克")
 
-        // 圆角按钮（切换选区圆角半径）
-        let cb = NSButton(frame: NSRect(x: x + 6, y: y, width: 40, height: btnSize))
-        cb.wantsLayer = true
-        cb.layer?.cornerRadius = 6
-        cb.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        cb.isBordered = false
-        cb.attributedTitle = NSAttributedString(string: "圆角", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white
-        ])
-        cb.title = ""
-        cb.target = self
-        cb.action = #selector(cornerTapped)
-        container.addSubview(cb)
-        container.registerTooltipButton(cb, text: "圆角")
-       cornerButton = cb
-       x += 6 + 40
+        // 画布按钮：点击展开子面板（圆角 + 阴影）
+        let cvBtn = NSButton(frame: NSRect(x: x + 6, y: y, width: btnSize, height: btnSize))
+        cvBtn.image = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "画布")
+        cvBtn.image?.isTemplate = true
+        cvBtn.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        cvBtn.isBordered = false
+        cvBtn.wantsLayer = true
+        cvBtn.layer?.cornerRadius = 6
+        cvBtn.title = ""
+        cvBtn.target = self
+        cvBtn.action = #selector(canvasTapped)
+        container.addSubview(cvBtn)
+        container.registerTooltipButton(cvBtn, text: "画布")
+        canvasButton = cvBtn
+        x += 6 + btnSize
 
         // 撤销按钮（撤销最后一个标注）
         let ub = NSButton(frame: NSRect(x: x + 4, y: y, width: btnSize, height: btnSize))
         ub.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: "撤销")
         ub.image?.isTemplate = true
-        ub.contentTintColor = .white
+        ub.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         ub.isBordered = false
         ub.wantsLayer = true
         ub.layer?.cornerRadius = 6
@@ -99,10 +111,26 @@ final class ScreenshotToolbar: NSWindow {
         updateUndoButton(canUndo: false)
         x += 4 + btnSize
 
+        // 更多工具按钮：点击展开子面板（识字/OCR 等）
+        let moreBtn = NSButton(frame: NSRect(x: x + 4, y: y, width: btnSize, height: btnSize))
+        moreBtn.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "更多")
+        moreBtn.image?.isTemplate = true
+        moreBtn.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        moreBtn.isBordered = false
+        moreBtn.wantsLayer = true
+        moreBtn.layer?.cornerRadius = 6
+        moreBtn.title = ""
+        moreBtn.target = self
+        moreBtn.action = #selector(moreTapped)
+        container.addSubview(moreBtn)
+        container.registerTooltipButton(moreBtn, text: "更多")
+        x += 4 + btnSize
+
         // 分隔线
         x += 8
-        let sep = NSBox(frame: NSRect(x: x, y: 6, width: 1, height: 32))
-        sep.boxType = .separator
+        let sep = NSView(frame: NSRect(x: x, y: 8, width: 1, height: 32))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
         container.addSubview(sep)
         x += 8
 
@@ -110,12 +138,12 @@ final class ScreenshotToolbar: NSWindow {
         let pBtn = NSButton(frame: NSRect(x: x, y: y, width: 28, height: 28))
         pBtn.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "主题")
         pBtn.image?.isTemplate = true
-        pBtn.contentTintColor = .white
+        pBtn.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         pBtn.isBordered = false
         pBtn.wantsLayer = true
         pBtn.layer?.cornerRadius = 6
         pBtn.layer?.borderWidth = 1
-        pBtn.layer?.borderColor = NSColor.black.withAlphaComponent(0.3).cgColor
+        pBtn.layer?.borderColor = NSColor.black.withAlphaComponent(0.12).cgColor
         pBtn.toolTip = "主题"
         pBtn.target = self
         pBtn.action = #selector(paletteTapped)
@@ -130,8 +158,9 @@ final class ScreenshotToolbar: NSWindow {
 
         // 分隔线
         x += 4
-        let sep2 = NSBox(frame: NSRect(x: x, y: 6, width: 1, height: 32))
-        sep2.boxType = .separator
+        let sep2 = NSView(frame: NSRect(x: x, y: 8, width: 1, height: 32))
+        sep2.wantsLayer = true
+        sep2.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
         container.addSubview(sep2)
         x += 8
 
@@ -150,7 +179,7 @@ final class ScreenshotToolbar: NSWindow {
         let btn = NSButton(frame: NSRect(x: x, y: y, width: size, height: size))
         btn.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         btn.image?.isTemplate = true
-        btn.contentTintColor = .white
+        btn.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         btn.isBordered = false
         btn.wantsLayer = true
         btn.layer?.cornerRadius = 6
@@ -211,7 +240,7 @@ final class ScreenshotToolbar: NSWindow {
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
         panel.isOpaque = false
-        panel.backgroundColor = NSColor(white: 0.16, alpha: 0.96)
+        panel.backgroundColor = NSColor(srgbRed: 0.89, green: 0.89, blue: 0.89, alpha: 0.98)
         panel.hasShadow = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -244,7 +273,7 @@ final class ScreenshotToolbar: NSWindow {
         customBtn.isBordered = false
         customBtn.attributedTitle = NSAttributedString(string: "自定义…", attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
         ])
         customBtn.alignment = .center
         customBtn.target = self
@@ -344,6 +373,86 @@ final class ScreenshotToolbar: NSWindow {
     @objc private func cancelTapped() { toolbarDelegate?.toolbarDidCancel() }
     @objc private func scrollTapped() { toolbarDelegate?.toolbarDidScroll() }
     @objc private func cornerTapped() { toolbarDelegate?.toolbarDidToggleCornerRadius() }
+
+    @objc private func canvasTapped() {
+        if canvasPanel != nil { closeCanvasPanel(); return }
+        showCanvasPanel()
+    }
+
+    @objc private func moreTapped() {
+        if morePanel != nil { closeMorePanel(); return }
+        showMorePanel()
+    }
+
+    @objc private func ocrTapped() {
+        closeMorePanel()
+        toolbarDelegate?.toolbarDidRequestOCR()
+    }
+
+    // MARK: - 更多工具子面板
+
+    private func showMorePanel() {
+        let panelWidth: CGFloat = 80
+        let panelHeight: CGFloat = 44
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+        panel.acceptsMouseMovedEvents = true
+
+        let card = NSView(frame: panel.contentView!.bounds)
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.masksToBounds = true
+        card.layer?.backgroundColor = NSColor(srgbRed: 0.89, green: 0.89, blue: 0.89, alpha: 0.98).cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.black.withAlphaComponent(0.06).cgColor
+        panel.contentView?.addSubview(card)
+
+        // 识字按钮（OCR 文字识别）
+        let ocrBtn = NSButton(frame: NSRect(x: 8, y: 8, width: 28, height: 28))
+        ocrBtn.image = NSImage(systemSymbolName: "doc.text.viewfinder", accessibilityDescription: "识字")
+        ocrBtn.image?.isTemplate = true
+        ocrBtn.contentTintColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        ocrBtn.isBordered = false
+        ocrBtn.wantsLayer = true
+        ocrBtn.layer?.cornerRadius = 6
+        ocrBtn.title = ""
+        ocrBtn.target = self
+        ocrBtn.action = #selector(ocrTapped)
+        card.addSubview(ocrBtn)
+
+        // 定位子面板在工具栏下方
+        let screenFrame = self.screen?.frame ?? NSScreen.main?.frame ?? .zero
+        let pos = CanvasPanelPositioner.position(
+            toolbarFrame: self.frame,
+            panelSize: CGSize(width: panelWidth, height: panelHeight),
+            screenFrame: screenFrame
+        )
+        panel.setFrameOrigin(pos)
+
+        panel.orderFrontRegardless()
+        morePanel = panel
+    }
+
+    func closeMorePanel() {
+        morePanel?.orderOut(nil)
+        morePanel = nil
+    }
+
+    @objc private func shadowToggled() {
+        toolbarDelegate?.toolbarDidToggleShadow()
+    }
+
+    @objc private func shadowSliderChanged() {
+        let opacity = shadowSlider?.doubleValue ?? 0.16
+        toolbarDelegate?.toolbarDidSetShadowOpacity(CGFloat(opacity))
+    }
     @objc private func undoTapped() { toolbarDelegate?.toolbarDidUndo() }
 
     // MARK: 工具状态
@@ -351,8 +460,8 @@ final class ScreenshotToolbar: NSWindow {
     func selectTool(_ tool: AnnotationType?) {
         for (t, btn) in toolButtons {
             btn.layer?.backgroundColor = (t == tool)
-                ? NSColor.white.withAlphaComponent(0.3).cgColor
-                : NSColor.white.withAlphaComponent(0.08).cgColor
+                ? NSColor.black.withAlphaComponent(0.12).cgColor
+                : NSColor.black.withAlphaComponent(0.04).cgColor
         }
     }
 
@@ -379,20 +488,139 @@ final class ScreenshotToolbar: NSWindow {
     /// 更新撤销按钮的可用状态（无可撤销标注时置灰）。
     func updateUndoButton(canUndo: Bool) {
         undoButton?.isEnabled = canUndo
-        undoButton?.contentTintColor = canUndo ? .white : NSColor.white.withAlphaComponent(0.3)
+        undoButton?.contentTintColor = canUndo ? .white : NSColor.black.withAlphaComponent(0.12)
     }
 
     /// 更新圆角按钮的视觉状态（激活时高亮并显示当前半径）。
     func updateCornerRadius(_ radius: CGFloat) {
         let active = CornerRounding.isEnabled(radius)
         cornerButton?.layer?.backgroundColor = active
-            ? NSColor.systemTeal.withAlphaComponent(0.6).cgColor
-            : NSColor.white.withAlphaComponent(0.08).cgColor
+            ? NSColor.systemBlue.withAlphaComponent(0.15).cgColor
+            : NSColor.black.withAlphaComponent(0.04).cgColor
         let title = active ? "圆\(Int(radius))" : "圆角"
         cornerButton?.attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
         ])
+    }
+
+    // MARK: - 画布子面板
+
+    /// 显示画布子面板（圆角 + 阴影控制）。
+    private func showCanvasPanel() {
+        let panelWidth: CGFloat = 320
+        let panelHeight: CGFloat = 44
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+                            styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isMovable = false
+        panel.acceptsMouseMovedEvents = true
+
+        let card = NSView(frame: panel.contentView!.bounds)
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.masksToBounds = true
+        card.layer?.backgroundColor = NSColor(srgbRed: 0.89, green: 0.89, blue: 0.89, alpha: 0.98).cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = NSColor.black.withAlphaComponent(0.06).cgColor
+        panel.contentView?.addSubview(card)
+
+        // 圆角按钮
+        let cb = NSButton(frame: NSRect(x: 8, y: 8, width: 50, height: 28))
+        cb.wantsLayer = true
+        cb.layer?.cornerRadius = 6
+        cb.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
+        cb.isBordered = false
+        cb.attributedTitle = NSAttributedString(string: "圆角", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
+        ])
+        cb.title = ""
+        cb.target = self
+        cb.action = #selector(cornerTapped)
+        card.addSubview(cb)
+        cornerButton = cb
+
+        // 分隔线
+        let sep = NSView(frame: NSRect(x: 64, y: 8, width: 1, height: 28))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
+        card.addSubview(sep)
+
+        // 阴影开关按钮
+        let shBtn = NSButton(frame: NSRect(x: 72, y: 8, width: 50, height: 28))
+        shBtn.wantsLayer = true
+        shBtn.layer?.cornerRadius = 6
+        shBtn.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
+        shBtn.isBordered = false
+        shBtn.attributedTitle = NSAttributedString(string: "阴影", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
+        ])
+        shBtn.title = ""
+        shBtn.target = self
+        shBtn.action = #selector(shadowToggled)
+        card.addSubview(shBtn)
+        shadowToggleButton = shBtn
+
+        // 阴影透明度标签
+        let sLabel = NSTextField(labelWithString: "16%")
+        sLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        sLabel.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
+        sLabel.alignment = .center
+        sLabel.frame = NSRect(x: 270, y: 14, width: 40, height: 16)
+        card.addSubview(sLabel)
+        shadowLabel = sLabel
+
+        // 阴影透明度滑块
+        let slider = NSSlider(frame: NSRect(x: 130, y: 14, width: 135, height: 16))
+        slider.minValue = 0
+        slider.maxValue = 1
+        slider.doubleValue = 0.16
+        slider.target = self
+        slider.action = #selector(shadowSliderChanged)
+        slider.controlSize = .small
+        card.addSubview(slider)
+        shadowSlider = slider
+
+        // 定位子面板在工具栏下方（基于工具栏窗口 frame，避免与工具栏重叠）
+        if let btn = canvasButton, let btnWin = btn.window {
+            let screenFrame = btnWin.screen?.frame ?? NSScreen.main?.frame ?? .zero
+            let pos = CanvasPanelPositioner.position(
+                toolbarFrame: btnWin.frame,
+                panelSize: CGSize(width: panelWidth, height: panelHeight),
+                screenFrame: screenFrame
+            )
+            panel.setFrameOrigin(pos)
+        }
+
+        panel.orderFrontRegardless()
+        canvasPanel = panel
+        updateCanvasShadowButton(enabled: true)
+    }
+
+    func closeCanvasPanel() {
+        canvasPanel?.orderOut(nil)
+        canvasPanel = nil
+    }
+
+    /// 更新阴影开关按钮状态。
+    func updateCanvasShadowButton(enabled: Bool) {
+        shadowToggleButton?.layer?.backgroundColor = enabled
+            ? NSColor.systemBlue.withAlphaComponent(0.15).cgColor
+            : NSColor.black.withAlphaComponent(0.04).cgColor
+    }
+
+    /// 更新阴影透明度显示。
+    func updateCanvasShadowOpacity(_ opacity: CGFloat) {
+        shadowSlider?.doubleValue = Double(opacity)
+        let pct = Int((opacity * 100).rounded())
+        shadowLabel?.stringValue = "\(pct)%"
     }
 
     private func toolTag(_ tool: AnnotationType?) -> Int {
@@ -470,8 +698,10 @@ final class ToolbarContainerView: NSView {
 
     private func showTooltip(text: String, for button: NSButton) {
         hideTooltip()
-        let font = NSFont.labelFont(ofSize: 12)
-        let labelSize = CGSize(width: 28, height: 16)
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let labelSize = CGSize(width: ceil(textSize.width), height: ceil(textSize.height))
         let buttonInWindow = button.superview?.convert(button.frame, to: nil) ?? button.frame
         let winOrigin = button.window?.frame.origin ?? .zero
         let buttonScreen = buttonInWindow.offsetBy(dx: winOrigin.x, dy: winOrigin.y)
@@ -484,21 +714,15 @@ final class ToolbarContainerView: NSView {
                             backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = false
+        panel.hasShadow = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isMovable = false
 
-        let label = NSTextField(labelWithString: text)
-        label.font = font
-        label.textColor = .white
-        label.alignment = .center
-        label.wantsLayer = true
-        label.layer?.cornerRadius = 4
-        label.layer?.backgroundColor = NSColor(white: 0, alpha: 0.85).cgColor
-        label.frame = panel.contentView!.bounds
-        label.autoresizingMask = [.width, .height]
-        panel.contentView?.addSubview(label)
+        let labelView = TooltipLabelView(text: text, font: font)
+        labelView.frame = panel.contentView!.bounds
+        labelView.autoresizingMask = [.width, .height]
+        panel.contentView?.addSubview(labelView)
 
         panel.orderFrontRegardless()
         tooltipWindow = panel
@@ -507,5 +731,42 @@ final class ToolbarContainerView: NSView {
     func hideTooltip() {
         tooltipWindow?.orderOut(nil)
         tooltipWindow = nil
+    }
+}
+
+/// 提示标签视图：浅色圆角背景 + 垂直居中深色文字。
+/// 使用 TooltipTextCentering 计算基线 y，修正 NSTextField 默认渲染偏上。
+private final class TooltipLabelView: NSView {
+    private let text: String
+    private let font: NSFont
+
+    init(text: String, font: NSFont) {
+        self.text = text
+        self.font = font
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = NSColor(srgbRed: 0.89, green: 0.89, blue: 0.89, alpha: 0.98).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.black.withAlphaComponent(0.06).cgColor
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
+        ]
+        let textWidth = (text as NSString).size(withAttributes: attrs).width
+        let baselineY = TooltipTextCentering.baselineY(
+            containerHeight: bounds.height,
+            ascender: font.ascender,
+            descender: font.descender
+        )
+        (text as NSString).draw(
+            at: NSPoint(x: bounds.midX - textWidth / 2, y: baselineY),
+            withAttributes: attrs
+        )
     }
 }

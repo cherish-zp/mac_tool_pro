@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalKeyMonitor: Any?
     private var eventTapListener: CGEventTapHotkeyListener?
     private var permissionTimer: Timer?
+    private var snippetManagerWindow: SnippetManagerWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -31,6 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupGlobalKeyMonitor()
         rebuildMenu()
         startRequestPolling()
+
+        // 片段数据变更时重建菜单（添加/删除/保存后菜单栏同步刷新）
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(rebuildMenuFromNotification),
+            name: .snippetsDidChange, object: nil
+        )
+    }
+
+    @objc private func rebuildMenuFromNotification() {
+        rebuildMenu()
     }
 
     /// 初始化 App 模块注册表 + Carbon 全局热键。
@@ -139,6 +150,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
+        // 快速片段
+        menu.addItem(.separator())
+        let snippetsHeader = menu.addItem(withTitle: "快速片段", action: nil, keyEquivalent: "")
+        snippetsHeader.isEnabled = false
+        let snippetManager = SnippetManager.shared
+        if snippetManager.snippets.isEmpty {
+            let emptyItem = menu.addItem(withTitle: "（暂无片段）", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+        } else {
+            for snippet in snippetManager.snippets {
+                let item = NSMenuItem(title: snippet.key, action: #selector(copySnippet(_:)), keyEquivalent: "")
+                item.target = self
+                item.toolTip = snippet.content
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(withTitle: "管理片段...", action: #selector(showSnippetManager), keyEquivalent: "")
+
         // 手动触发截图 + 诊断
         menu.addItem(.separator())
         menu.addItem(withTitle: "截图 (F1)", action: #selector(triggerScreenshot), keyEquivalent: "")
@@ -178,5 +207,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showHotkeyLog() {
         NSWorkspace.shared.open(DiagLog.logURL)
+    }
+
+    // MARK: - 快速片段
+
+    @objc private func copySnippet(_ sender: NSMenuItem) {
+        let key = sender.title
+        if SnippetManager.shared.copyToPasteboard(forKey: key) {
+            DiagLog.write("Snippet copied: \(key)")
+        }
+    }
+
+    @objc private func showSnippetManager() {
+        if snippetManagerWindow == nil {
+            snippetManagerWindow = SnippetManagerWindow()
+        }
+        snippetManagerWindow?.showAndFocus()
     }
 }

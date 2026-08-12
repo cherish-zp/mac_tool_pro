@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import Vision
 
 /// 截图协调器：串联「捕获画面 -> 全屏覆盖层选区 -> 工具条编辑 -> 复制/保存/贴图」全流程。
 final class ScreenshotCoordinator {
@@ -11,6 +12,9 @@ final class ScreenshotCoordinator {
     private let config = ScreenshotConfig()
     private var activeOverlay: ScreenshotOverlayWindow?
     private var selectionRect: CGRect?
+    private var canvasSettings = CanvasSettings.default
+    private var ocrResultPanel: NSPanel?
+    private var ocrTextView: NSTextView?
     private var escMonitor: Any?
     /// 选区超时定时器：覆盖层显示后若用户长时间未操作（如全屏下覆盖层不可见），自动清理。
     private var idleTimeoutTimer: Timer?
@@ -157,6 +161,7 @@ final class ScreenshotCoordinator {
             overlayWindows.removeAll()
         }
         toolbar?.cleanupColorPanel()
+        toolbar?.closeCanvasPanel()
         toolbar?.orderOut(nil)
         toolbar = nil
         activeOverlay = nil
@@ -226,6 +231,9 @@ final class ScreenshotCoordinator {
         self.toolbar = toolbar
         // 同步圆角按钮状态（默认已启用圆角）
         toolbar.updateCornerRadius(window.overlayView!.cornerRadius)
+        // 同步阴影状态
+        toolbar.updateCanvasShadowButton(enabled: canvasSettings.shadowEnabled)
+        toolbar.updateCanvasShadowOpacity(canvasSettings.shadowOpacity)
 
         for w in overlayWindows where w !== window {
             w.orderOut(nil)
@@ -271,7 +279,40 @@ final class ScreenshotCoordinator {
                 finalImage = rounded
             }
         }
+        // 应用阴影边框（画布设置中阴影开启时，在边缘描深色线，不改变图片尺寸）
+        if canvasSettings.shadowEnabled {
+            let scaleX = view.bounds.width > 0 ? CGFloat(cropped.width) / view.bounds.width : 1
+            let pxRadius = CornerRounding.clampedRadius(view.cornerRadius, for: sel.size) * scaleX
+            if let bordered = applyShadowBorder(to: finalImage, cornerRadius: pxRadius,
+                                                opacity: canvasSettings.shadowOpacity) {
+                finalImage = bordered
+            }
+        }
         return finalImage
+    }
+
+    /// 在图片最外边缘描深色边线（阴影边框），不改变图片尺寸。
+    private func applyShadowBorder(to image: CGImage, cornerRadius: CGFloat,
+                                   opacity: CGFloat) -> CGImage? {
+        let w = image.width
+        let h = image.height
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: w, height: h,
+                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        ctx.draw(image, in: bounds)
+        let borderRect = ShadowBorder.borderRect(imageSize: bounds.size)
+        ctx.setStrokeColor(ShadowBorder.borderColor(opacity: opacity))
+        ctx.setLineWidth(ShadowBorder.borderWidth)
+        let r = CornerRounding.clampedRadius(cornerRadius, for: bounds.size)
+        if r > 0 {
+            ctx.addPath(CGPath(roundedRect: borderRect, cornerWidth: r, cornerHeight: r, transform: nil))
+        } else {
+            ctx.addRect(borderRect)
+        }
+        ctx.strokePath()
+        return ctx.makeImage()
     }
 
     /// 将 CGImage 四角裁剪为圆角（透明），用于圆角截图输出。
@@ -374,6 +415,7 @@ final class ScreenshotCoordinator {
         cancelIdleTimeout()
         for w in overlayWindows { w.orderOut(nil) }
         toolbar?.cleanupColorPanel()
+        toolbar?.closeCanvasPanel()
         toolbar?.orderOut(nil)
         overlayWindows.removeAll()
         toolbar = nil
@@ -428,11 +470,120 @@ extension ScreenshotCoordinator: ScreenshotToolbarDelegate {
 
     func toolbarDidToggleCornerRadius() {
         guard let view = activeOverlay?.overlayView, let sel = selectionRect else { return }
-        let next = CornerRounding.nextRadius(view.cornerRadius)
-        view.cornerRadius = CornerRounding.clampedRadius(next, for: sel.size)
+        canvasSettings = canvasSettings.withNextCornerRadius(selectionSize: sel.size)
+        view.cornerRadius = canvasSettings.cornerRadius
         toolbar?.updateCornerRadius(view.cornerRadius)
         view.needsDisplay = true
         DiagLog.write("toolbarDidToggleCornerRadius: radius=\(view.cornerRadius)")
+    }
+
+    func toolbarDidToggleShadow() {
+        canvasSettings = canvasSettings.toggledShadow()
+        toolbar?.updateCanvasShadowButton(enabled: canvasSettings.shadowEnabled)
+        DiagLog.write("toolbarDidToggleShadow: enabled=\(canvasSettings.shadowEnabled)")
+    }
+
+    func toolbarDidSetShadowOpacity(_ opacity: CGFloat) {
+        canvasSettings = canvasSettings.withShadowOpacity(opacity)
+        toolbar?.updateCanvasShadowOpacity(canvasSettings.shadowOpacity)
+        DiagLog.write("toolbarDidSetShadowOpacity: opacity=\(canvasSettings.shadowOpacity)")
+    }
+
+    func toolbarDidRequestOCR() {
+        guard let overlay = activeOverlay, let view = overlay.overlayView,
+              let sel = selectionRect else { return }
+        let image = view.capturedImage
+        let cropRect = SelectionRect.cropRectPixels(
+            selection: sel, imageSize: CGSize(width: image.width, height: image.height),
+            viewSize: view.bounds.size
+        )
+        guard let cropped = image.cropping(to: cropRect) else { return }
+        DiagLog.write("toolbarDidRequestOCR: starting OCR on \(cropped.width)x\(cropped.height) image")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let request = VNRecognizeTextRequest { request, error in
+                guard error == nil,
+                      let observations = request.results as? [VNRecognizedTextObservation] else {
+                    DispatchQueue.main.async { self?.showOCRResult("识别失败") }
+                    return
+                }
+                let items = observations.compactMap { obs -> OCRTextItem? in
+                    guard let candidate = obs.topCandidates(1).first else { return nil }
+                    return OCRTextItem(text: candidate.string, confidence: candidate.confidence,
+                                       boundingBox: obs.boundingBox)
+                }
+                let filtered = OCRTextSorter.filterByConfidence(items)
+                let text = OCRTextSorter.toText(filtered)
+                DiagLog.write("toolbarDidRequestOCR: recognized \(filtered.count) items")
+                DispatchQueue.main.async { self?.showOCRResult(text) }
+            }
+            request.recognitionLevel = .accurate
+            request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
+            request.usesLanguageCorrection = true
+            let handler = VNImageRequestHandler(cgImage: cropped)
+            try? handler.perform([request])
+        }
+    }
+
+    /// 显示 OCR 识别结果面板（可编辑 + 复制）。
+    private func showOCRResult(_ text: String) {
+        ocrResultPanel?.orderOut(nil)
+        let panelWidth: CGFloat = 420
+        let panelHeight: CGFloat = 300
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+                            styleMask: [.titled, .closable, .resizable],
+                            backing: .buffered, defer: false)
+        panel.title = "识别结果"
+        panel.center()
+        panel.isReleasedWhenClosed = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 3)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let content = NSView(frame: panel.contentView!.bounds)
+        content.autoresizingMask = [.width, .height]
+        panel.contentView = content
+
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+        let textView = NSTextView()
+        textView.isEditable = true
+        textView.font = .systemFont(ofSize: 13)
+        textView.string = text.isEmpty ? "（未识别到文字）" : text
+        textView.autoresizingMask = [.width]
+        textView.textContainerInset = NSSize(width: 6, height: 6)
+        scrollView.documentView = textView
+        content.addSubview(scrollView)
+
+        let copyBtn = NSButton(title: "复制", target: self, action: #selector(copyOCRText(_:)))
+        copyBtn.translatesAutoresizingMaskIntoConstraints = false
+        copyBtn.bezelStyle = .rounded
+        copyBtn.keyEquivalent = "\r"
+        content.addSubview(copyBtn)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            scrollView.bottomAnchor.constraint(equalTo: copyBtn.topAnchor, constant: -12),
+            copyBtn.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
+            copyBtn.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+        ])
+
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        ocrResultPanel = panel
+        ocrTextView = textView
+    }
+
+    @objc private func copyOCRText(_ sender: NSButton) {
+        guard let textView = ocrTextView else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(textView.string, forType: .string)
+        DiagLog.write("OCR text copied to pasteboard")
+        ocrResultPanel?.orderOut(nil)
+        ocrResultPanel = nil
     }
 
     func toolbarDidUndo() {
@@ -461,6 +612,7 @@ func toolbarDidScroll() {
         // 隐藏所有自身 UI（悬停提示、工具条、覆盖层）
         toolbar?.hideTooltips()
         toolbar?.cleanupColorPanel()
+        toolbar?.closeCanvasPanel()
         toolbar?.orderOut(nil)
         for w in overlayWindows { w.orderOut(nil) }
 
