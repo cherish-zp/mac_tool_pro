@@ -7,6 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="mac_tool_pro"
+
+# 清理历史残留的可执行副本，避免 Spotlight 索引到与正式安装同名的旧版 app
+rm -rf build/${APP_NAME}.app
 DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-77SQ3JU8MG}"
 DERIVED="build/DerivedData"
 APP="$DERIVED/Build/Products/Release/${APP_NAME}.app"
@@ -48,3 +51,8 @@ rmdir "$MNT" 2>/dev/null || true
 
 echo "✓ Packaged: $(pwd)/$DMG"
 echo "  Size: $(du -h "$DMG" | cut -f1)"
+
+# 阻止 Spotlight 索引构建产物目录，避免搜索出现多个同名 app
+touch build/.metadata_never_index build/DerivedData/.metadata_never_index 2>/dev/null || true
+# 同步清理 Xcode GUI 默认 DerivedData 中可能残留的同名 app
+find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -name "${APP_NAME}.app" -type d -prune -exec rm -rf {} + 2>/dev/null || true
