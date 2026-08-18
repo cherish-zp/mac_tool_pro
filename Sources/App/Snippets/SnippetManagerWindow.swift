@@ -2,7 +2,7 @@ import AppKit
 
 /// 片段管理窗口：master-detail 布局（左侧列表 + 右侧编辑）。
 /// 毛玻璃背景、圆角卡片、SF Symbols 图标按钮、实时搜索、一键复制。
-final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate {
+final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate, NSWindowDelegate {
 
     private let manager = SnippetManager.shared
     private var tableView: NSTableView!
@@ -17,6 +17,9 @@ final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate {
 
     private static let cellID = NSUserInterfaceItemIdentifier("snippetCell")
 
+    /// 供 key/搜索等 NSTextField 使用的可撤销 field editor（系统默认不允许 Undo）。
+    private lazy var undoableFieldEditor = UndoFieldEditorPolicy.makeFieldEditor()
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 500),
@@ -29,6 +32,7 @@ final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate {
         center()
         isReleasedWhenClosed = false
         minSize = NSSize(width: 660, height: 420)
+        delegate = self
         buildUI()
         reloadTable()
     }
@@ -115,6 +119,7 @@ final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate {
         contentField = NSTextView()
         contentField.isEditable = true
         contentField.isRichText = false
+        contentField.allowsUndo = true
         contentField.font = .systemFont(ofSize: 13)
         contentField.backgroundColor = .clear
         contentField.autoresizingMask = [.width]
@@ -258,6 +263,13 @@ final class SnippetManagerWindow: NSWindow, NSSearchFieldDelegate {
         let hasSelection = selectedSnippet != nil
         copyButton.isEnabled = hasSelection
         deleteButton.isEnabled = hasSelection
+    }
+
+    // MARK: - 撤销支持
+
+    /// 为 key/搜索等 NSTextField 提供启用 Undo 的 field editor，使 Cmd+Z 生效。
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        undoableFieldEditor
     }
 
     // MARK: - 搜索

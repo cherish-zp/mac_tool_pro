@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(triggerScreenshot),
             name: NSNotification.Name("com.zp.mac-tool-pro.trigger-screenshot"), object: nil
         )
+        setupMainMenu()
         setupGlobalKeyMonitor()
         rebuildMenu()
         startRequestPolling()
@@ -42,6 +43,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func rebuildMenuFromNotification() {
         rebuildMenu()
+    }
+
+    /// 构建主菜单：菜单栏应用默认无主菜单，导致 NSTextView/NSTextField
+    /// 无法响应 Cmd+V/C/X/A/Z。此处添加「编辑」子菜单修复粘贴等快捷键。
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App 菜单（必须存在，否则系统不显示主菜单）
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "退出 mac_tool_pro",
+                        action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+
+        // 编辑菜单（Cut/Copy/Paste/SelectAll/Undo/Redo）
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu()
+        editMenu.title = "编辑"
+        for spec in EditMenuSpec.editMenuItems {
+            editMenu.addItem(withTitle: spec.title,
+                             action: NSSelectorFromString(spec.action),
+                             keyEquivalent: spec.keyEquivalent)
+        }
+        editMenuItem.submenu = editMenu
+
+        NSApp.mainMenu = mainMenu
     }
 
     /// 初始化 App 模块注册表 + Carbon 全局热键。
