@@ -244,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let key = sender.title
         if SnippetManager.shared.copyToPasteboard(forKey: key) {
             DiagLog.write("Snippet copied: \(key)")
+            CopyToastPresenter.shared.show()
         }
     }
 
