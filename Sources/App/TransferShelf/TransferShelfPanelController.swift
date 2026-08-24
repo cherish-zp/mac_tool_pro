@@ -325,7 +325,6 @@ final class TransferShelfView: NSVisualEffectView {
     private let stackView = NSStackView()
     private let emptyIcon = NSImageView()
     private let emptyLabel = NSTextField(labelWithString: "拖文件到这里暂存")
-    private let clearButton = NSButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -355,18 +354,6 @@ final class TransferShelfView: NSVisualEffectView {
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(emptyLabel)
 
-        clearButton.bezelStyle = .texturedRounded
-        clearButton.isBordered = false
-        clearButton.image = NSImage(systemSymbolName: "xmark.circle.fill",
-                                    accessibilityDescription: "清空")
-        clearButton.imageScaling = .scaleProportionallyDown
-        clearButton.contentTintColor = .tertiaryLabelColor
-        clearButton.toolTip = "清空"
-        clearButton.target = self
-        clearButton.action = #selector(clearAllClicked)
-        clearButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(clearButton)
-
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: TransferShelfLayoutSpec.panelPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -TransferShelfLayoutSpec.panelPadding),
@@ -377,11 +364,6 @@ final class TransferShelfView: NSVisualEffectView {
 
             emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 12),
             emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -TransferShelfLayoutSpec.clearButtonTrailing),
-            clearButton.topAnchor.constraint(equalTo: topAnchor, constant: TransferShelfLayoutSpec.clearButtonTop),
-            clearButton.widthAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.clearButtonSize),
-            clearButton.heightAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.clearButtonSize),
         ])
     }
 
@@ -389,10 +371,6 @@ final class TransferShelfView: NSVisualEffectView {
 
     override func wantsPeriodicDraggingUpdates() -> Bool {
         false
-    }
-
-    @objc private func clearAllClicked() {
-        TransferShelfPanelController.shared.clearAll()
     }
 
     func preferredPanelWidth() -> CGFloat {
@@ -456,6 +434,7 @@ final class TransferShelfItemView: NSView {
     private let item: TransferItem
     private let iconView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
+    private let removeButton = NSButton()
 
     init(item: TransferItem) {
         self.item = item
@@ -483,11 +462,31 @@ final class TransferShelfItemView: NSView {
         layer?.cornerRadius = 10
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
 
+        removeButton.bezelStyle = .texturedRounded
+        removeButton.isBordered = false
+        let removeSymbol = NSImage(systemSymbolName: "xmark.circle.fill",
+                                   accessibilityDescription: "删除") ?? NSImage()
+        removeSymbol.size = NSSize(width: TransferShelfLayoutSpec.itemClearButtonSize,
+                                   height: TransferShelfLayoutSpec.itemClearButtonSize)
+        removeButton.image = removeSymbol
+        removeButton.imageScaling = .scaleProportionallyDown
+        removeButton.contentTintColor = .tertiaryLabelColor
+        removeButton.toolTip = "删除"
+        removeButton.target = self
+        removeButton.action = #selector(removeSelf)
+        removeButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(removeButton)
+
         NSLayoutConstraint.activate([
-            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            iconView.widthAnchor.constraint(equalToConstant: 30),
-            iconView.heightAnchor.constraint(equalToConstant: 30),
+            iconView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: -3),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            iconView.widthAnchor.constraint(equalToConstant: 28),
+            iconView.heightAnchor.constraint(equalToConstant: 28),
+
+            removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -TransferShelfLayoutSpec.itemClearButtonOffset),
+            removeButton.topAnchor.constraint(equalTo: topAnchor, constant: TransferShelfLayoutSpec.itemClearButtonOffset),
+            removeButton.widthAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.itemClearButtonSize),
+            removeButton.heightAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.itemClearButtonSize),
 
             nameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 2),
             nameLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 2),
@@ -507,10 +506,12 @@ final class TransferShelfItemView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+        removeButton.contentTintColor = .labelColor
     }
 
     override func mouseExited(with event: NSEvent) {
         layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
+        removeButton.contentTintColor = .tertiaryLabelColor
     }
 
     /// 点击：在 Finder 中定位该文件。

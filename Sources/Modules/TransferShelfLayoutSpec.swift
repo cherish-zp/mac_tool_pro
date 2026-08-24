@@ -27,10 +27,9 @@ public enum TransferShelfLayoutSpec {
         return NSPointInRect(location, rect)
     }
 
-    /// 右上角清空按钮。
-    public static let clearButtonSize: CGFloat = 16
-    public static let clearButtonTrailing: CGFloat = 8
-    public static let clearButtonTop: CGFloat = 8
+    /// 条目右上角单独删除按钮。
+    public static let itemClearButtonSize: CGFloat = 12
+    public static let itemClearButtonOffset: CGFloat = 2
 
     /// 拖出条目时的预览图像帧（NSDraggingItem 必须设置非零 frame，否则崩溃）。
     public static let dragImageFrame: NSRect = NSRect(x: 0, y: 0, width: 64, height: 64)

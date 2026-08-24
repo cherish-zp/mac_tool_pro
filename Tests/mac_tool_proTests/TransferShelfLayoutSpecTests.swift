@@ -78,13 +78,12 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
         XCTAssertGreaterThan(frame.height, 0)
     }
 
-    func test_clearButtonSize() {
-        XCTAssertEqual(TransferShelfLayoutSpec.clearButtonSize, 16, accuracy: 0.1)
+    func test_itemClearButtonSize() {
+        XCTAssertEqual(TransferShelfLayoutSpec.itemClearButtonSize, 12, accuracy: 0.1)
     }
 
-    func test_clearButtonInsets() {
-        XCTAssertEqual(TransferShelfLayoutSpec.clearButtonTrailing, 8, accuracy: 0.1)
-        XCTAssertEqual(TransferShelfLayoutSpec.clearButtonTop, 8, accuracy: 0.1)
+    func test_itemClearButtonInsets() {
+        XCTAssertEqual(TransferShelfLayoutSpec.itemClearButtonOffset, 2, accuracy: 0.1)
     }
 
     func test_dragImageFrameIsSquare() {
