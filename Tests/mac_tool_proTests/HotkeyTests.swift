@@ -36,3 +36,25 @@ final class HotkeyTests: XCTestCase {
         XCTAssertEqual(set.count, 2)
     }
 }
+
+
+/// TDD: 功能键显示名 - 菜单栏模块项标注快捷键（如「文件中转 (F2)」）。
+final class HotkeyFunctionKeyLabelTests: XCTestCase {
+
+    func test_f1Label() {
+        XCTAssertEqual(Hotkey.f1.functionKeyLabel, "F1")
+    }
+
+    func test_f2Label() {
+        XCTAssertEqual(Hotkey(keyCode: 120).functionKeyLabel, "F2")
+    }
+
+    func test_f3Label() {
+        XCTAssertEqual(Hotkey.f3.functionKeyLabel, "F3")
+    }
+
+    func test_nonFunctionKeyReturnsNil() {
+        XCTAssertNil(Hotkey(keyCode: 0).functionKeyLabel)
+        XCTAssertNil(Hotkey(keyCode: 50, modifiers: ModifierKey.command).functionKeyLabel)
+    }
+}

@@ -26,4 +26,21 @@ public struct Hotkey: Codable, Equatable, Hashable {
 
     /// F3 = kVK_F3(99)，贴图默认快捷键（截图选区完成后按 F3 贴图到桌面）。
     public static let f3 = Hotkey(keyCode: 99)
+
+    /// 功能键显示名（F1/F2/F3...），用于菜单栏快捷键标注；非功能键返回 nil。
+    public var functionKeyLabel: String? {
+        switch keyCode {
+        case 122: return "F1"
+        case 120: return "F2"
+        case 99:  return "F3"
+        case 98:  return "F4"
+        case 96:  return "F5"
+        case 97:  return "F6"
+        case 101: return "F9"
+        case 100: return "F10"
+        case 109: return "F11"
+        case 103: return "F12"
+        default:  return nil
+        }
+    }
 }

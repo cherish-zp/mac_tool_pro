@@ -179,7 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let modulesHeader = menu.addItem(withTitle: "功能模块", action: nil, keyEquivalent: "")
         modulesHeader.isEnabled = false
         for module in moduleRegistry.modules {
-            let item = NSMenuItem(title: module.title, action: #selector(toggleModule(_:)), keyEquivalent: "")
+            let hotkeySuffix = module.defaultHotkey.functionKeyLabel.map { " (\($0))" } ?? ""
+            let item = NSMenuItem(title: module.title + hotkeySuffix, action: #selector(toggleModule(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = module.id
             item.state = moduleRegistry.isEnabled(module.id) ? .on : .off
