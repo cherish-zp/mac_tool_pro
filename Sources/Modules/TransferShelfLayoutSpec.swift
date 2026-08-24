@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 /// 文件中转站布局规格：顶部横向面板、条目尺寸、动画参数。
 public enum TransferShelfLayoutSpec {
@@ -9,7 +10,14 @@ public enum TransferShelfLayoutSpec {
     public static let cornerRadius: CGFloat = 20
     public static let fadeInDuration: TimeInterval = 0.2
     public static let fadeOutDuration: TimeInterval = 0.25
-    public static let topGap: CGFloat = 8
+    public static let topGap: CGFloat = 4
+    /// 面板从顶部上方滑入的距离。
+    public static let slideInOffset: CGFloat = 12
+    /// 顶部热区（拖拽会话期间激活，文件拖入即呼出面板）。
+    public static let hotZoneWidth: CGFloat = 320
+    public static let hotZoneHeight: CGFloat = 14
+    /// 拖出条目时的预览图像帧（NSDraggingItem 必须设置非零 frame，否则崩溃）。
+    public static let dragImageFrame: NSRect = NSRect(x: 0, y: 0, width: 64, height: 64)
 
     /// 面板宽度：随条目数增长，封顶 maxWidth。
     public static func panelWidth(itemCount: Int, maxWidth: CGFloat = 560) -> CGFloat {

@@ -8,7 +8,10 @@ final class TransferShelfPanelController: NSObject {
 
     private var panel: NSPanel?
     private var shelfView: TransferShelfView!
+    private var hotZonePanel: NSPanel?
+    private var hotZoneView: TransferShelfHotZoneView!
     private var hideWorkItem: DispatchWorkItem?
+    private var isDragSessionActive = false
 
     private var store = TransferShelfStore() {
         didSet { persist() }
@@ -21,37 +24,50 @@ final class TransferShelfPanelController: NSObject {
 
     // MARK: - 对外接口
 
-    /// 显示面板（拖拽会话开始或菜单触发）。
+    /// 显示面板（贴住屏幕顶部中央，滑入动画）。
     func showPanel(manual: Bool = false) {
         let toastPanel = panel ?? makePanel()
         panel = toastPanel
         position(toastPanel)
         cancelScheduledHide()
 
+        // 从顶部上方滑入 + 淡入
+        var startFrame = toastPanel.frame
+        startFrame.origin.y += TransferShelfLayoutSpec.slideInOffset
+        toastPanel.setFrame(startFrame, display: false)
         toastPanel.alphaValue = 0
         toastPanel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = TransferShelfLayoutSpec.fadeInDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.allowsImplicitAnimation = true
+            toastPanel.animator().setFrame(positionedFrame(toastPanel), display: true)
             toastPanel.animator().alphaValue = 1
         })
-        scheduleHide(after: manual ? 5 : 3.2)
+        if !isDragSessionActive {
+            scheduleHide(after: manual ? 5 : 3.5)
+        }
     }
 
-    /// 拖拽会话开始（全局鼠标拖动超阈值）。
+    /// 全局拖拽会话开始：面板常驻显示，激活顶部热区。
     func dragSessionStarted() {
+        isDragSessionActive = true
+        cancelScheduledHide()
         showPanel()
+        activateHotZone()
     }
 
-    /// 拖拽会话结束（鼠标松开）。若面板刚接收文件则延长停留。
+    /// 全局拖拽会话结束：面板停留片刻后滑出，禁用热区。
     func dragSessionEnded() {
+        isDragSessionActive = false
+        deactivateHotZone()
         scheduleHide(after: 3)
     }
 
     // MARK: - 面板构建
 
     private func makePanel() -> NSPanel {
-        let item = TransferShelfView(frame: NSRect(x: 0, y: 0, width: 200, height: TransferShelfLayoutSpec.panelHeight))
+        let item = TransferShelfView(frame: NSRect(x: 0, y: 0, width: 220, height: TransferShelfLayoutSpec.panelHeight))
         item.onItemsChanged = { [weak self] in
             self?.reloadItems()
         }
@@ -69,14 +85,67 @@ final class TransferShelfPanelController: NSObject {
         newPanel.isOpaque = false
         newPanel.backgroundColor = .clear
         newPanel.hasShadow = true
-        newPanel.level = .floating
+        newPanel.level = .statusBar
         newPanel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
         newPanel.hidesOnDeactivate = false
         newPanel.contentView = item
         return newPanel
     }
 
-    /// 面板定位到鼠标所在屏幕顶部、水平居中。
+    /// 顶部热区：拖拽会话期间激活，文件拖入即呼出/高亮面板。
+    private func makeHotZonePanel() -> NSPanel {
+        let view = TransferShelfHotZoneView(
+            frame: NSRect(x: 0, y: 0,
+                          width: TransferShelfLayoutSpec.hotZoneWidth,
+                          height: TransferShelfLayoutSpec.hotZoneHeight)
+        )
+        view.onFileEntered = { [weak self] in
+            self?.showPanel()
+        }
+        hotZoneView = view
+
+        let hotPanel = NSPanel(
+            contentRect: view.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        hotPanel.isOpaque = false
+        hotPanel.backgroundColor = .clear
+        hotPanel.hasShadow = false
+        hotPanel.level = .statusBar
+        hotPanel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
+        hotPanel.ignoresMouseEvents = true
+        hotPanel.contentView = view
+        return hotPanel
+    }
+
+    private func activateHotZone() {
+        let hotPanel = hotZonePanel ?? makeHotZonePanel()
+        hotZonePanel = hotPanel
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        guard let screen = screen else { return }
+        let visible = screen.visibleFrame
+        hotPanel.setFrame(
+            NSRect(
+                x: visible.midX - TransferShelfLayoutSpec.hotZoneWidth / 2,
+                y: visible.maxY - TransferShelfLayoutSpec.hotZoneHeight,
+                width: TransferShelfLayoutSpec.hotZoneWidth,
+                height: TransferShelfLayoutSpec.hotZoneHeight
+            ),
+            display: false
+        )
+        hotPanel.ignoresMouseEvents = false
+        hotPanel.orderFrontRegardless()
+    }
+
+    private func deactivateHotZone() {
+        hotZonePanel?.ignoresMouseEvents = true
+        hotZonePanel?.orderOut(nil)
+    }
+
+    /// 面板贴住鼠标所在屏幕顶部中央。
     private func position(_ toastPanel: NSPanel) {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
@@ -96,11 +165,29 @@ final class TransferShelfPanelController: NSObject {
         shelfView.frame = NSRect(x: 0, y: 0, width: width, height: height)
     }
 
+    private func positionedFrame(_ toastPanel: NSPanel) -> NSRect {
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        guard let screen = screen else { return toastPanel.frame }
+        let visible = screen.visibleFrame
+        let width = shelfView.preferredPanelWidth()
+        let height = TransferShelfLayoutSpec.panelHeight
+        return NSRect(
+            x: visible.midX - width / 2,
+            y: visible.maxY - height - TransferShelfLayoutSpec.topGap,
+            width: width,
+            height: height
+        )
+    }
+
     private func reloadItems() {
+        guard let toastPanel = panel else { return }
         shelfView.render(items: store.items)
-        position(panel ?? NSPanel())
+        position(toastPanel)
         cancelScheduledHide()
-        scheduleHide(after: 3.5)
+        if !isDragSessionActive {
+            scheduleHide(after: 3.5)
+        }
     }
 
     // MARK: - 显示/隐藏调度
@@ -121,9 +208,12 @@ final class TransferShelfPanelController: NSObject {
 
     private func hidePanel() {
         guard let toastPanel = panel else { return }
+        var endFrame = toastPanel.frame
+        endFrame.origin.y += TransferShelfLayoutSpec.slideInOffset
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = TransferShelfLayoutSpec.fadeOutDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            toastPanel.animator().setFrame(endFrame, display: true)
             toastPanel.animator().alphaValue = 0
         }, completionHandler: {
             if toastPanel.alphaValue == 0 {
@@ -163,15 +253,45 @@ final class TransferShelfPanelController: NSObject {
         shelfView.render(items: store.items)
         position(toastPanel)
         cancelScheduledHide()
-        scheduleHide(after: 3.5)
+        if !isDragSessionActive {
+            scheduleHide(after: 3.5)
+        }
     }
 
     /// 供条目操作回调：移除条目。
     func removeItem(id: UUID) {
         if store.remove(id: id) {
             shelfView.render(items: store.items)
-            position(panel ?? NSPanel())
+            if let toastPanel = panel {
+                position(toastPanel)
+            }
         }
+    }
+}
+
+// MARK: - 顶部热区视图
+
+/// 拖拽会话期间激活的顶部热区：文件拖入即呼出面板。
+final class TransferShelfHotZoneView: NSView {
+
+    var onFileEntered: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL, .URL])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func wantsPeriodicDraggingUpdates() -> Bool {
+        false
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL],
+              urls.contains(where: { $0.isFileURL }) else { return [] }
+        onFileEntered?()
+        return .copy
     }
 }
 
@@ -185,7 +305,8 @@ final class TransferShelfView: NSVisualEffectView {
 
     private var items: [TransferItem] = []
     private let stackView = NSStackView()
-    private let emptyLabel = NSTextField(labelWithString: "拖入文件暂存")
+    private let emptyIcon = NSImageView()
+    private let emptyLabel = NSTextField(labelWithString: "拖文件到这里暂存")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -202,6 +323,14 @@ final class TransferShelfView: NSVisualEffectView {
         stackView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stackView)
 
+        let emptySymbol = NSImage(systemSymbolName: "tray.and.arrow.down",
+                                  accessibilityDescription: "拖入文件暂存") ?? NSImage()
+        emptySymbol.size = NSSize(width: 18, height: 18)
+        emptyIcon.image = emptySymbol
+        emptyIcon.contentTintColor = .secondaryLabelColor
+        emptyIcon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(emptyIcon)
+
         emptyLabel.font = .systemFont(ofSize: 12, weight: .medium)
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -212,7 +341,10 @@ final class TransferShelfView: NSVisualEffectView {
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -TransferShelfLayoutSpec.panelPadding),
             stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor),
+            emptyIcon.trailingAnchor.constraint(equalTo: emptyLabel.leadingAnchor, constant: -6),
+            emptyIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 12),
             emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -224,7 +356,7 @@ final class TransferShelfView: NSVisualEffectView {
     }
 
     func preferredPanelWidth() -> CGFloat {
-        items.isEmpty ? 180 : TransferShelfLayoutSpec.panelWidth(itemCount: items.count)
+        items.isEmpty ? 210 : TransferShelfLayoutSpec.panelWidth(itemCount: items.count)
     }
 
     func render(items: [TransferItem]) {
@@ -239,7 +371,9 @@ final class TransferShelfView: NSVisualEffectView {
             }
             stackView.addArrangedSubview(itemView)
         }
-        emptyLabel.isHidden = !items.isEmpty
+        let isEmpty = items.isEmpty
+        emptyIcon.isHidden = !isEmpty
+        emptyLabel.isHidden = !isEmpty
     }
 
     // MARK: - 拖入接收
@@ -290,7 +424,7 @@ final class TransferShelfItemView: NSView {
                                  height: TransferShelfLayoutSpec.itemSize))
 
         let icon = NSWorkspace.shared.icon(forFile: item.url.path)
-        icon.size = NSSize(width: 32, height: 32)
+        icon.size = NSSize(width: 30, height: 30)
         iconView.image = icon
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
@@ -307,24 +441,37 @@ final class TransferShelfItemView: NSView {
 
         wantsLayer = true
         layer?.cornerRadius = 10
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.25).cgColor
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
 
         NSLayoutConstraint.activate([
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 5),
-            iconView.widthAnchor.constraint(equalToConstant: 32),
-            iconView.heightAnchor.constraint(equalToConstant: 32),
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            iconView.widthAnchor.constraint(equalToConstant: 30),
+            iconView.heightAnchor.constraint(equalToConstant: 30),
 
             nameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 2),
             nameLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 2),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
-            nameLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -3),
+            nameLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -4),
         ])
 
-        registerForDraggedTypes([])
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        ))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
+    }
 
     /// 点击：在 Finder 中定位该文件。
     override func mouseDown(with event: NSEvent) {
@@ -332,10 +479,20 @@ final class TransferShelfItemView: NSView {
     }
 
     /// 拖动：把暂存文件拖出到 Finder/其他 App。
+    /// 必须设置非零 draggingFrame 与图像组件，否则 beginDraggingSession 抛异常导致崩溃。
     override func mouseDragged(with event: NSEvent) {
         let pasteboardItem = NSPasteboardItem()
         pasteboardItem.setString(item.url.absoluteString, forType: .fileURL)
+
         let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        draggingItem.draggingFrame = TransferShelfLayoutSpec.dragImageFrame
+        draggingItem.imageComponentsProvider = { [weak self] in
+            let image = self?.iconView.image ?? NSImage()
+            let component = NSDraggingImageComponent(key: .icon)
+            component.contents = image
+            component.frame = TransferShelfLayoutSpec.dragImageFrame
+            return [component]
+        }
         beginDraggingSession(with: [draggingItem], event: event, source: self)
     }
 

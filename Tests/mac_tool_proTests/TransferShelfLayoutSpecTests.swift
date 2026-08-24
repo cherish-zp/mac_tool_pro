@@ -36,6 +36,26 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
     }
 
     func test_topGap() {
-        XCTAssertEqual(TransferShelfLayoutSpec.topGap, 8, accuracy: 0.1)
+        XCTAssertEqual(TransferShelfLayoutSpec.topGap, 4, accuracy: 0.1)
+    }
+
+    func test_slideInOffset() {
+        XCTAssertEqual(TransferShelfLayoutSpec.slideInOffset, 12, accuracy: 0.1)
+    }
+
+    func test_hotZoneSize() {
+        XCTAssertEqual(TransferShelfLayoutSpec.hotZoneWidth, 320, accuracy: 0.1)
+        XCTAssertEqual(TransferShelfLayoutSpec.hotZoneHeight, 14, accuracy: 0.1)
+    }
+
+    func test_dragImageFrameIsNonZero() {
+        let frame = TransferShelfLayoutSpec.dragImageFrame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertGreaterThan(frame.height, 0)
+    }
+
+    func test_dragImageFrameIsSquare() {
+        let frame = TransferShelfLayoutSpec.dragImageFrame
+        XCTAssertEqual(frame.width, frame.height, accuracy: 0.1)
     }
 }
