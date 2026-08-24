@@ -45,7 +45,31 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
 
     func test_hotZoneSize() {
         XCTAssertEqual(TransferShelfLayoutSpec.hotZoneWidth, 320, accuracy: 0.1)
-        XCTAssertEqual(TransferShelfLayoutSpec.hotZoneHeight, 14, accuracy: 0.1)
+        XCTAssertEqual(TransferShelfLayoutSpec.hotZoneHeight, 18, accuracy: 0.1)
+    }
+
+    func test_hotZoneHitTopCenter() {
+        let frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        let point = NSPoint(x: 500, y: 795)
+        XCTAssertTrue(TransferShelfLayoutSpec.isInHotZone(location: point, visibleFrame: frame))
+    }
+
+    func test_hotZoneMissTopLeft() {
+        let frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        let point = NSPoint(x: 50, y: 795)
+        XCTAssertFalse(TransferShelfLayoutSpec.isInHotZone(location: point, visibleFrame: frame))
+    }
+
+    func test_hotZoneMissMiddle() {
+        let frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        let point = NSPoint(x: 500, y: 400)
+        XCTAssertFalse(TransferShelfLayoutSpec.isInHotZone(location: point, visibleFrame: frame))
+    }
+
+    func test_hotZoneHitRespectsVisibleFrameOrigin() {
+        let frame = NSRect(x: 100, y: 50, width: 1000, height: 800)
+        let point = NSPoint(x: 600, y: 845)
+        XCTAssertTrue(TransferShelfLayoutSpec.isInHotZone(location: point, visibleFrame: frame))
     }
 
     func test_dragImageFrameIsNonZero() {

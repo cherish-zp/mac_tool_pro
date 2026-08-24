@@ -19,7 +19,8 @@ final class TransferShelfModule: AppModule {
     func start() {
         monitor.start(
             onDragStart: { TransferShelfPanelController.shared.dragSessionStarted() },
-            onDragEnd: { TransferShelfPanelController.shared.dragSessionEnded() }
+            onDragEnd: { TransferShelfPanelController.shared.dragSessionEnded() },
+            onHotZoneHover: { TransferShelfPanelController.shared.hotZoneHovered() }
         )
     }
 

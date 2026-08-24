@@ -10,12 +10,17 @@ final class MouseDragMonitor {
     private var policy = TransferShelfDragPolicy()
     private var onDragStart: (() -> Void)?
     private var onDragEnd: (() -> Void)?
+    private var onHotZoneHover: (() -> Void)?
 
     /// 启动监听。回调自动派发到主线程。
-    func start(onDragStart: @escaping () -> Void, onDragEnd: @escaping () -> Void) {
+    /// onHotZoneHover：拖拽过程中鼠标进入任意屏幕顶部中央热区（几何兜底）。
+    func start(onDragStart: @escaping () -> Void,
+               onDragEnd: @escaping () -> Void,
+               onHotZoneHover: @escaping () -> Void) {
         stop()
         self.onDragStart = onDragStart
         self.onDragEnd = onDragEnd
+        self.onHotZoneHover = onHotZoneHover
         policy.reset()
 
         let mask: CGEventMask =
@@ -78,6 +83,19 @@ final class MouseDragMonitor {
             if policy.mouseDragged(to: location) {
                 DispatchQueue.main.async { [weak self] in
                     self?.onDragStart?()
+                }
+            }
+            if policy.isDragging {
+                let inHotZone = NSScreen.screens.contains { screen in
+                    TransferShelfLayoutSpec.isInHotZone(
+                        location: location,
+                        visibleFrame: screen.visibleFrame
+                    )
+                }
+                if policy.hotZoneHoverChanged(inside: inHotZone), inHotZone {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onHotZoneHover?()
+                    }
                 }
             }
         case .leftMouseUp:

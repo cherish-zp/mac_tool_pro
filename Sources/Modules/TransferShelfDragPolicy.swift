@@ -8,6 +8,7 @@ public struct TransferShelfDragPolicy {
 
     private var pressLocation: CGPoint?
     public private(set) var isDragging = false
+    private var hoveringHotZone = false
 
     public init() {}
 
@@ -35,9 +36,21 @@ public struct TransferShelfDragPolicy {
         isDragging = false
     }
 
+    /// 热区 hover 状态切换。返回 true 表示状态发生变化（进入或离开）。
+    @discardableResult
+    public mutating func hotZoneHoverChanged(inside: Bool) -> Bool {
+        guard inside != hoveringHotZone else { return false }
+        hoveringHotZone = inside
+        return true
+    }
+
+    /// 当前是否处于热区内。
+    public var isInHotZone: Bool { hoveringHotZone }
+
     /// 重置全部状态。
     public mutating func reset() {
         pressLocation = nil
         isDragging = false
+        hoveringHotZone = false
     }
 }

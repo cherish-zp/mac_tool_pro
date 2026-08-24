@@ -57,6 +57,12 @@ final class TransferShelfPanelController: NSObject {
         activateHotZone()
     }
 
+    /// 拖拽过程中鼠标进入顶部热区（几何兜底）：呼出面板。
+    func hotZoneHovered() {
+        guard isDragSessionActive else { return }
+        showPanel()
+    }
+
     /// 全局拖拽会话结束：面板停留片刻后滑出，禁用热区。
     func dragSessionEnded() {
         isDragSessionActive = false
@@ -288,6 +294,9 @@ final class TransferShelfHotZoneView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         registerForDraggedTypes([.fileURL, .URL])
+        // 极淡背景确保窗口参与系统拖拽 hit-test（完全透明可能被跳过）
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.02).cgColor
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

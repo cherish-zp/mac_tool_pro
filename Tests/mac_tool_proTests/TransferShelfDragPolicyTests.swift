@@ -44,3 +44,28 @@ final class TransferShelfDragPolicyTests: XCTestCase {
         XCTAssertFalse(policy.mouseDragged(to: CGPoint(x: 400, y: 0)))
     }
 }
+
+
+/// TDD: 热区 hover 状态 - 进入顶部热区仅回调一次，避免重复触发。
+final class TransferShelfHotZoneHoverTests: XCTestCase {
+
+    func test_enterHotZoneReturnsTrueOnce() {
+        var policy = TransferShelfDragPolicy()
+        XCTAssertTrue(policy.hotZoneHoverChanged(inside: true))
+        XCTAssertFalse(policy.hotZoneHoverChanged(inside: true))
+    }
+
+    func test_exitThenReenterHotZone() {
+        var policy = TransferShelfDragPolicy()
+        XCTAssertTrue(policy.hotZoneHoverChanged(inside: true))
+        XCTAssertTrue(policy.hotZoneHoverChanged(inside: false))
+        XCTAssertTrue(policy.hotZoneHoverChanged(inside: true))
+    }
+
+    func test_resetClearsHotZoneState() {
+        var policy = TransferShelfDragPolicy()
+        _ = policy.hotZoneHoverChanged(inside: true)
+        policy.reset()
+        XCTAssertTrue(policy.hotZoneHoverChanged(inside: true))
+    }
+}

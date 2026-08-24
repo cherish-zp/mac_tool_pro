@@ -15,7 +15,18 @@ public enum TransferShelfLayoutSpec {
     public static let slideInOffset: CGFloat = 12
     /// 顶部热区（拖拽会话期间激活，文件拖入即呼出面板）。
     public static let hotZoneWidth: CGFloat = 320
-    public static let hotZoneHeight: CGFloat = 14
+    public static let hotZoneHeight: CGFloat = 18
+    /// 判断点是否位于指定屏幕可见区域顶部中央的热区内。
+    public static func isInHotZone(location: NSPoint, visibleFrame: NSRect) -> Bool {
+        let rect = NSRect(
+            x: visibleFrame.midX - hotZoneWidth / 2,
+            y: visibleFrame.maxY - hotZoneHeight,
+            width: hotZoneWidth,
+            height: hotZoneHeight
+        )
+        return NSPointInRect(location, rect)
+    }
+
     /// 右上角清空按钮。
     public static let clearButtonSize: CGFloat = 16
     public static let clearButtonTrailing: CGFloat = 8
