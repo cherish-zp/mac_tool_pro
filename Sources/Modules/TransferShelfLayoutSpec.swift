@@ -16,6 +16,11 @@ public enum TransferShelfLayoutSpec {
     /// 顶部热区（拖拽会话期间激活，文件拖入即呼出面板）。
     public static let hotZoneWidth: CGFloat = 320
     public static let hotZoneHeight: CGFloat = 14
+    /// 右上角清空按钮。
+    public static let clearButtonSize: CGFloat = 16
+    public static let clearButtonTrailing: CGFloat = 8
+    public static let clearButtonTop: CGFloat = 8
+
     /// 拖出条目时的预览图像帧（NSDraggingItem 必须设置非零 frame，否则崩溃）。
     public static let dragImageFrame: NSRect = NSRect(x: 0, y: 0, width: 64, height: 64)
 

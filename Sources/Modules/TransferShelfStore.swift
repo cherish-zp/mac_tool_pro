@@ -39,6 +39,11 @@ public struct TransferShelfStore {
         return true
     }
 
+    /// 清空全部条目。
+    public mutating func clear() {
+        items.removeAll()
+    }
+
     /// 是否已包含指定 URL。
     public func contains(url: URL) -> Bool {
         items.contains { $0.url == url }

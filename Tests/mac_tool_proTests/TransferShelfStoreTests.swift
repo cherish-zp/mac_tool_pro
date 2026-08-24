@@ -38,6 +38,20 @@ final class TransferShelfStoreTests: XCTestCase {
         XCTAssertEqual(restored.items.map(\.url.path), ["/tmp/a.txt", "/tmp/b.txt"])
     }
 
+    func test_clearRemovesAllItems() {
+        var store = TransferShelfStore()
+        store.add(url: URL(fileURLWithPath: "/tmp/a.txt"))
+        store.add(url: URL(fileURLWithPath: "/tmp/b.txt"))
+        store.clear()
+        XCTAssertTrue(store.items.isEmpty)
+    }
+
+    func test_clearOnEmptyStoreIsSafe() {
+        var store = TransferShelfStore()
+        store.clear()
+        XCTAssertTrue(store.items.isEmpty)
+    }
+
     func test_expiredItemWhenFileMissing() {
         let store = TransferShelfStore()
         let item = TransferItem(id: UUID(), url: URL(fileURLWithPath: "/gone.txt"),

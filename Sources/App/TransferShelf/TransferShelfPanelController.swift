@@ -49,11 +49,11 @@ final class TransferShelfPanelController: NSObject {
         }
     }
 
-    /// 全局拖拽会话开始：面板常驻显示，激活顶部热区。
+    /// 全局拖拽会话开始：仅激活顶部热区，面板等文件真正拖入热区再出现，
+    /// 避免拖动窗口等非文件拖拽时误弹面板。
     func dragSessionStarted() {
         isDragSessionActive = true
         cancelScheduledHide()
-        showPanel()
         activateHotZone()
     }
 
@@ -258,6 +258,15 @@ final class TransferShelfPanelController: NSObject {
         }
     }
 
+    /// 清空全部暂存条目。
+    func clearAll() {
+        store.clear()
+        shelfView.render(items: store.items)
+        if let toastPanel = panel {
+            position(toastPanel)
+        }
+    }
+
     /// 供条目操作回调：移除条目。
     func removeItem(id: UUID) {
         if store.remove(id: id) {
@@ -307,6 +316,7 @@ final class TransferShelfView: NSVisualEffectView {
     private let stackView = NSStackView()
     private let emptyIcon = NSImageView()
     private let emptyLabel = NSTextField(labelWithString: "拖文件到这里暂存")
+    private let clearButton = NSButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -336,6 +346,18 @@ final class TransferShelfView: NSVisualEffectView {
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(emptyLabel)
 
+        clearButton.bezelStyle = .texturedRounded
+        clearButton.isBordered = false
+        clearButton.image = NSImage(systemSymbolName: "xmark.circle.fill",
+                                    accessibilityDescription: "清空")
+        clearButton.imageScaling = .scaleProportionallyDown
+        clearButton.contentTintColor = .tertiaryLabelColor
+        clearButton.toolTip = "清空"
+        clearButton.target = self
+        clearButton.action = #selector(clearAllClicked)
+        clearButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(clearButton)
+
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: TransferShelfLayoutSpec.panelPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -TransferShelfLayoutSpec.panelPadding),
@@ -346,6 +368,11 @@ final class TransferShelfView: NSVisualEffectView {
 
             emptyLabel.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 12),
             emptyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            clearButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -TransferShelfLayoutSpec.clearButtonTrailing),
+            clearButton.topAnchor.constraint(equalTo: topAnchor, constant: TransferShelfLayoutSpec.clearButtonTop),
+            clearButton.widthAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.clearButtonSize),
+            clearButton.heightAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.clearButtonSize),
         ])
     }
 
@@ -353,6 +380,10 @@ final class TransferShelfView: NSVisualEffectView {
 
     override func wantsPeriodicDraggingUpdates() -> Bool {
         false
+    }
+
+    @objc private func clearAllClicked() {
+        TransferShelfPanelController.shared.clearAll()
     }
 
     func preferredPanelWidth() -> CGFloat {
