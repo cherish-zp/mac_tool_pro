@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager!
     private var moduleRegistry: AppModuleRegistry!
     private var screenshotModule: ScreenshotModule!
+    private var transferShelfModule: TransferShelfModule!
     private var globalKeyMonitor: Any?
     private var eventTapListener: CGEventTapHotkeyListener?
     private var permissionTimer: Timer?
@@ -81,6 +82,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         screenshotModule = ScreenshotModule()
         moduleRegistry.register(screenshotModule)
+
+        transferShelfModule = TransferShelfModule()
+        moduleRegistry.register(transferShelfModule)
+        if moduleRegistry.isEnabled(transferShelfModule.id) {
+            transferShelfModule.start()
+        }
     }
 
     /// 热键监听：三层兜底确保 F1 能触发截图。
@@ -226,6 +233,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleModule(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         moduleRegistry.setEnabled(id, !moduleRegistry.isEnabled(id))
+        if id == transferShelfModule.id {
+            if moduleRegistry.isEnabled(id) {
+                transferShelfModule.start()
+            } else {
+                transferShelfModule.stop()
+            }
+        }
         rebuildMenu()
     }
 
