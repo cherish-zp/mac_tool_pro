@@ -27,6 +27,10 @@ public enum TransferShelfLayoutSpec {
         return NSPointInRect(location, rect)
     }
 
+    /// 面板发丝描边宽度与条目圆角（苹果风细节）。
+    public static let panelHairlineWidth: CGFloat = 1
+    public static let itemCornerRadius: CGFloat = 12
+
     /// 条目右上角单独删除按钮。
     public static let itemClearButtonSize: CGFloat = 12
     public static let itemClearButtonOffset: CGFloat = 2

@@ -78,6 +78,14 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
         XCTAssertGreaterThan(frame.height, 0)
     }
 
+    func test_panelHairlineWidth() {
+        XCTAssertEqual(TransferShelfLayoutSpec.panelHairlineWidth, 1, accuracy: 0.1)
+    }
+
+    func test_itemCornerRadius() {
+        XCTAssertEqual(TransferShelfLayoutSpec.itemCornerRadius, 12, accuracy: 0.1)
+    }
+
     func test_itemClearButtonSize() {
         XCTAssertEqual(TransferShelfLayoutSpec.itemClearButtonSize, 12, accuracy: 0.1)
     }

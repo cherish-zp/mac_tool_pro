@@ -334,6 +334,11 @@ final class TransferShelfView: NSVisualEffectView {
         wantsLayer = true
         layer?.cornerRadius = TransferShelfLayoutSpec.cornerRadius
         layer?.masksToBounds = true
+        // NSVisualEffectView 材质不吃普通 cornerRadius，用圆角遮罩真正裁出圆角
+        layer?.mask = roundedMask(cornerRadius: TransferShelfLayoutSpec.cornerRadius)
+        // 发丝描边（亮色 10%），苹果风细节
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        layer?.borderWidth = TransferShelfLayoutSpec.panelHairlineWidth
         registerForDraggedTypes([.fileURL, .URL])
 
         stackView.orientation = .horizontal
@@ -368,6 +373,23 @@ final class TransferShelfView: NSVisualEffectView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func roundedMask(cornerRadius: CGFloat) -> CAShapeLayer {
+        let path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+        let mask = CAShapeLayer()
+        mask.path = path
+        return mask
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.mask = roundedMask(cornerRadius: TransferShelfLayoutSpec.cornerRadius)
+    }
 
     override func wantsPeriodicDraggingUpdates() -> Bool {
         false
@@ -459,8 +481,8 @@ final class TransferShelfItemView: NSView {
         addSubview(nameLabel)
 
         wantsLayer = true
-        layer?.cornerRadius = 10
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
+        layer?.cornerRadius = TransferShelfLayoutSpec.itemCornerRadius
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
 
         removeButton.bezelStyle = .texturedRounded
         removeButton.isBordered = false
@@ -505,12 +527,12 @@ final class TransferShelfItemView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.22).cgColor
         removeButton.contentTintColor = .labelColor
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.18).cgColor
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
         removeButton.contentTintColor = .tertiaryLabelColor
     }
 
