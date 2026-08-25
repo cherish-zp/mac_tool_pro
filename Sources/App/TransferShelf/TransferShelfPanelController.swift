@@ -157,18 +157,18 @@ final class TransferShelfPanelController: NSObject {
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let screen = screen else { return }
         let visible = screen.visibleFrame
-        let width = shelfView.preferredPanelWidth()
-        let height = TransferShelfLayoutSpec.panelHeight
+        let size = shelfView.preferredPanelSize()
+        let height = min(size.height, visible.height - TransferShelfLayoutSpec.topGap * 2)
         toastPanel.setFrame(
             NSRect(
-                x: visible.midX - width / 2,
+                x: visible.midX - size.width / 2,
                 y: visible.maxY - height - TransferShelfLayoutSpec.topGap,
-                width: width,
+                width: size.width,
                 height: height
             ),
             display: true
         )
-        shelfView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        shelfView.frame = NSRect(x: 0, y: 0, width: size.width, height: height)
     }
 
     private func positionedFrame(_ toastPanel: NSPanel) -> NSRect {
@@ -176,12 +176,12 @@ final class TransferShelfPanelController: NSObject {
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         guard let screen = screen else { return toastPanel.frame }
         let visible = screen.visibleFrame
-        let width = shelfView.preferredPanelWidth()
-        let height = TransferShelfLayoutSpec.panelHeight
+        let size = shelfView.preferredPanelSize()
+        let height = min(size.height, visible.height - TransferShelfLayoutSpec.topGap * 2)
         return NSRect(
-            x: visible.midX - width / 2,
+            x: visible.midX - size.width / 2,
             y: visible.maxY - height - TransferShelfLayoutSpec.topGap,
-            width: width,
+            width: size.width,
             height: height
         )
     }
@@ -339,10 +339,18 @@ final class TransferShelfView: NSView {
         layer?.borderWidth = TransferShelfLayoutSpec.panelHairlineWidth
         registerForDraggedTypes([.fileURL, .URL])
 
-        stackView.orientation = .horizontal
+        stackView.orientation = .vertical
         stackView.spacing = TransferShelfLayoutSpec.itemSpacing
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stackView)
+
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.documentView = stackView
+        addSubview(scrollView)
 
         let emptySymbol = NSImage(systemSymbolName: "tray.and.arrow.down",
                                   accessibilityDescription: "拖入文件暂存") ?? NSImage()
@@ -358,9 +366,10 @@ final class TransferShelfView: NSView {
         addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            stackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: TransferShelfLayoutSpec.panelPadding),
-            stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -TransferShelfLayoutSpec.panelPadding),
-            stackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             emptyIcon.trailingAnchor.constraint(equalTo: emptyLabel.leadingAnchor, constant: -6),
             emptyIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -385,8 +394,14 @@ final class TransferShelfView: NSView {
         false
     }
 
-    func preferredPanelWidth() -> CGFloat {
-        items.isEmpty ? 210 : TransferShelfLayoutSpec.panelWidth(itemCount: items.count)
+    func preferredPanelSize() -> CGSize {
+        if items.isEmpty {
+            return CGSize(width: 210, height: TransferShelfLayoutSpec.panelHeight)
+        }
+        return CGSize(
+            width: TransferShelfLayoutSpec.verticalPanelWidth,
+            height: TransferShelfLayoutSpec.panelHeight(itemCount: items.count)
+        )
     }
 
     func render(items: [TransferItem]) {

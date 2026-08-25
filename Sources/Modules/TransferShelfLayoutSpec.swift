@@ -27,6 +27,15 @@ public enum TransferShelfLayoutSpec {
         return NSPointInRect(location, rect)
     }
 
+    /// 竖向排布：面板固定宽度与动态高度。
+    public static let verticalPanelWidth: CGFloat = 76
+
+    /// 竖向面板高度：随条目数增长，封顶 maxHeight。
+    public static func panelHeight(itemCount: Int, maxHeight: CGFloat = 400) -> CGFloat {
+        let content = itemSize * CGFloat(itemCount) + itemSpacing * CGFloat(max(0, itemCount - 1))
+        return min(panelPadding * 2 + content, maxHeight)
+    }
+
     /// 面板半透明背景不透明度（自绘圆角背景，彻底消除透明直角）。
     public static let panelBackgroundAlpha: CGFloat = 0.82
 
