@@ -79,12 +79,17 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
     }
 
     func test_verticalPanelWidth() {
-        XCTAssertEqual(TransferShelfLayoutSpec.verticalPanelWidth, 76, accuracy: 0.1)
+        XCTAssertEqual(TransferShelfLayoutSpec.verticalPanelWidth, 180, accuracy: 0.1)
+    }
+
+    func test_verticalItemSize() {
+        XCTAssertEqual(TransferShelfLayoutSpec.verticalItemWidth, 156, accuracy: 0.1)
+        XCTAssertEqual(TransferShelfLayoutSpec.verticalItemHeight, 44, accuracy: 0.1)
     }
 
     func test_verticalPanelHeightFitsItems() {
         let height = TransferShelfLayoutSpec.panelHeight(itemCount: 3)
-        let expected: CGFloat = 12 + 52 * 3 + 10 * 2 + 12
+        let expected: CGFloat = 12 + 44 * 3 + 10 * 2 + 12
         XCTAssertEqual(height, expected, accuracy: 0.1)
     }
 

@@ -466,18 +466,18 @@ final class TransferShelfItemView: NSView {
     init(item: TransferItem) {
         self.item = item
         super.init(frame: NSRect(x: 0, y: 0,
-                                 width: TransferShelfLayoutSpec.itemSize,
-                                 height: TransferShelfLayoutSpec.itemSize))
+                                 width: TransferShelfLayoutSpec.verticalItemWidth,
+                                 height: TransferShelfLayoutSpec.verticalItemHeight))
 
         let icon = NSWorkspace.shared.icon(forFile: item.url.path)
-        icon.size = NSSize(width: 30, height: 30)
+        icon.size = NSSize(width: 24, height: 24)
         iconView.image = icon
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
         nameLabel.stringValue = item.name
-        nameLabel.font = .systemFont(ofSize: 9, weight: .medium)
-        nameLabel.textColor = .secondaryLabelColor
+        nameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        nameLabel.textColor = .labelColor
         nameLabel.maximumNumberOfLines = 1
         nameLabel.lineBreakMode = .byTruncatingMiddle
         nameLabel.cell?.truncatesLastVisibleLine = true
@@ -505,20 +505,22 @@ final class TransferShelfItemView: NSView {
         addSubview(removeButton)
 
         NSLayoutConstraint.activate([
-            iconView.centerXAnchor.constraint(equalTo: centerXAnchor, constant: -3),
-            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            iconView.widthAnchor.constraint(equalToConstant: 28),
-            iconView.heightAnchor.constraint(equalToConstant: 28),
+            widthAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.verticalItemWidth),
+            heightAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.verticalItemHeight),
+
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 24),
+            iconView.heightAnchor.constraint(equalToConstant: 24),
+
+            nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: removeButton.leadingAnchor, constant: -4),
 
             removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -TransferShelfLayoutSpec.itemClearButtonOffset),
-            removeButton.topAnchor.constraint(equalTo: topAnchor, constant: TransferShelfLayoutSpec.itemClearButtonOffset),
+            removeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             removeButton.widthAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.itemClearButtonSize),
             removeButton.heightAnchor.constraint(equalToConstant: TransferShelfLayoutSpec.itemClearButtonSize),
-
-            nameLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 2),
-            nameLabel.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 2),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
-            nameLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -4),
         ])
 
         addTrackingArea(NSTrackingArea(
