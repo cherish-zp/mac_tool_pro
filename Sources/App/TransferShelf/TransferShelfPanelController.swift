@@ -315,8 +315,8 @@ final class TransferShelfHotZoneView: NSView {
 
 // MARK: - 暂存面板视图
 
-/// 毛玻璃暂存面板：接收文件拖入，横向排列条目。
-final class TransferShelfView: NSVisualEffectView {
+/// 暂存面板：自绘半透明圆角背景（彻底消除透明直角），接收文件拖入。
+final class TransferShelfView: NSView {
 
     var onItemsChanged: (() -> Void)?
     var onInteracting: (() -> Void)?
@@ -328,14 +328,12 @@ final class TransferShelfView: NSVisualEffectView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .hudWindow
-        blendingMode = .behindWindow
-        state = .active
         wantsLayer = true
+        // 自绘半透明圆角背景：普通 layer 圆角 100% 生效，窗口阴影跟随圆角，
+        // 彻底消除 NSVisualEffectView 窗口级模糊残留的透明直角。
         layer?.cornerRadius = TransferShelfLayoutSpec.cornerRadius
         layer?.masksToBounds = true
-        // NSVisualEffectView 材质不吃普通 cornerRadius，用圆角遮罩真正裁出圆角
-        layer?.mask = roundedMask(cornerRadius: TransferShelfLayoutSpec.cornerRadius)
+        layer?.backgroundColor = panelBackgroundColor.cgColor
         // 发丝描边（亮色 10%），苹果风细节
         layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
         layer?.borderWidth = TransferShelfLayoutSpec.panelHairlineWidth
@@ -374,21 +372,13 @@ final class TransferShelfView: NSVisualEffectView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private func roundedMask(cornerRadius: CGFloat) -> CAShapeLayer {
-        let path = CGPath(
-            roundedRect: bounds,
-            cornerWidth: cornerRadius,
-            cornerHeight: cornerRadius,
-            transform: nil
-        )
-        let mask = CAShapeLayer()
-        mask.path = path
-        return mask
+    private var panelBackgroundColor: NSColor {
+        NSColor.controlBackgroundColor.withAlphaComponent(TransferShelfLayoutSpec.panelBackgroundAlpha)
     }
 
-    override func layout() {
-        super.layout()
-        layer?.mask = roundedMask(cornerRadius: TransferShelfLayoutSpec.cornerRadius)
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        layer?.backgroundColor = panelBackgroundColor.cgColor
     }
 
     override func wantsPeriodicDraggingUpdates() -> Bool {

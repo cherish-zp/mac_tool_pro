@@ -27,6 +27,9 @@ public enum TransferShelfLayoutSpec {
         return NSPointInRect(location, rect)
     }
 
+    /// 面板半透明背景不透明度（自绘圆角背景，彻底消除透明直角）。
+    public static let panelBackgroundAlpha: CGFloat = 0.82
+
     /// 面板发丝描边宽度与条目圆角（苹果风细节）。
     public static let panelHairlineWidth: CGFloat = 1
     public static let itemCornerRadius: CGFloat = 12

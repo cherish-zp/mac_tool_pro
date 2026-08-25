@@ -78,6 +78,10 @@ final class TransferShelfLayoutSpecTests: XCTestCase {
         XCTAssertGreaterThan(frame.height, 0)
     }
 
+    func test_panelBackgroundAlpha() {
+        XCTAssertEqual(TransferShelfLayoutSpec.panelBackgroundAlpha, 0.82, accuracy: 0.001)
+    }
+
     func test_panelHairlineWidth() {
         XCTAssertEqual(TransferShelfLayoutSpec.panelHairlineWidth, 1, accuracy: 0.1)
     }
