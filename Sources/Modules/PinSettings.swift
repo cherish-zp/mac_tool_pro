@@ -8,7 +8,7 @@ public extension Notification.Name {
 
 /// 贴图呼吸灯样式：顶部横条（默认）或左上角圆点。
 public enum PinIndicatorStyle: String, Codable, Equatable, CaseIterable {
-    /// 顶部 1pt 横条呼吸灯，宽度与贴图等宽。
+    /// 顶部 2pt 横条呼吸灯，宽度与贴图等宽。
     case topBar
     /// 左上角圆点闪烁指示（兼关闭按钮）。
     case cornerDot

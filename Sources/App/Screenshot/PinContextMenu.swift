@@ -7,10 +7,15 @@ final class PinContextMenu: NSObject {
 
     private let pasteboard: Pasteboard
     private let imageProvider: () -> CGImage?
+    private let pointSizeProvider: () -> NSSize
 
-    init(pasteboard: Pasteboard, imageProvider: @escaping () -> CGImage?) {
+    /// pointSizeProvider 提供贴图原始点尺寸（未缩放），复制时携带与工具条一致的 DPI 口径。
+    init(pasteboard: Pasteboard,
+         imageProvider: @escaping () -> CGImage?,
+         pointSizeProvider: @escaping () -> NSSize) {
         self.pasteboard = pasteboard
         self.imageProvider = imageProvider
+        self.pointSizeProvider = pointSizeProvider
         super.init()
     }
 
@@ -30,7 +35,8 @@ final class PinContextMenu: NSObject {
 
     @objc private func copyImageToClipboard(_ sender: NSMenuItem) {
         guard let image = imageProvider() else { return }
-        pasteboard.copyImage(image)
-        DiagLog.write("PinContextMenu: 已复制图片 \(image.width)x\(image.height) 到剪贴板")
+        let pointSize = pointSizeProvider()
+        pasteboard.copyImage(image, pointSize: pointSize)
+        DiagLog.write("PinContextMenu: 已复制图片 \(image.width)x\(image.height)（pointSize \(pointSize.width)x\(pointSize.height)）到剪贴板")
     }
 }

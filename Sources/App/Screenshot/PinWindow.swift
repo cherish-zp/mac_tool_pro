@@ -2,7 +2,7 @@ import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
 /// 直接使用原始 CGImage 绘制，避免 NSImage 转换导致色差/模糊。
-/// 呼吸灯样式可配置：顶部 1pt 呼吸横条（默认，悬停贴图浮现关闭按钮）
+/// 呼吸灯样式可配置：顶部 2pt 呼吸横条（默认，悬停贴图浮现关闭按钮）
 /// 或左上角圆点闪烁按钮（兼关闭入口），设置变更立即生效。
 final class PinWindow: NSWindow {
 
@@ -41,10 +41,12 @@ final class PinWindow: NSWindow {
         // 呼吸灯样式：读取设置（默认顶部横条）
         imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
 
-        // 右键菜单：复制图片（复制动作走注入的 Pasteboard 抽象）
+        // 右键菜单：复制图片（复制动作走注入的 Pasteboard 抽象；
+        // pointSize 取贴图原始点尺寸（未缩放），与工具条复制的逻辑尺寸口径一致）
         imageView.addContextMenu(PinContextMenu(
             pasteboard: SystemPasteboard(),
-            imageProvider: { [weak imageView] in imageView?.cgImage }
+            imageProvider: { [weak imageView] in imageView?.cgImage },
+            pointSizeProvider: { [weak imageView] in imageView?.originalSize ?? .zero }
         ))
 
         // 设置变更立即生效于已打开的贴图
@@ -81,7 +83,9 @@ final class PinImageView: NSView {
     private var closeButton: PinCloseButton?
     private var indicatorBar: PinIndicatorBar?
     private var hoverTrackingArea: NSTrackingArea?
-    private var originalSize: CGSize = .zero
+    /// 贴图原始点尺寸（创建时传入的 displaySize，未随滚轮缩放变化），
+    /// 供右键复制携带与工具条一致的点尺寸口径。
+    private(set) var originalSize: CGSize = .zero
     private var currentScale: CGFloat = 1.0
 
     private var dragStartMouse: NSPoint = .zero

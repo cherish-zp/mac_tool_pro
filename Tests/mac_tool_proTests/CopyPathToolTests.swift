@@ -37,5 +37,5 @@ final class PasteboardSpy: Pasteboard {
     var copied: String?
     var copiedImage: CGImage?
     func copy(_ string: String) { copied = string }
-    func copyImage(_ image: CGImage) { copiedImage = image }
+    func copyImage(_ image: CGImage, pointSize: NSSize) { copiedImage = image }
 }
