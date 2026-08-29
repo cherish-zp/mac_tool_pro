@@ -45,7 +45,9 @@ final class ScreenshotCoordinator {
 
         // 2. 捕获所有屏幕画面（在显示覆盖层之前）
         let displays = captureService.captureAllDisplays()
-        DiagLog.write("Captured \(displays.count) display(s)")
+        // 无屏幕录制授权时 CGDisplayCreateImage 不报错，只会返回无窗口内容的壁纸图，
+        // 记录预检结果便于从 diag.log 直接定位"截图变空桌面"类问题
+        DiagLog.write("Captured \(displays.count) display(s), screenRecordingPreflight=\(CGPreflightScreenCaptureAccess())")
         guard !displays.isEmpty else { finish(); return }
 
         // 不切换 activationPolicy：accessory App 切到 .regular 会导致系统切换 Space，

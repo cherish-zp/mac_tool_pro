@@ -2,11 +2,14 @@ import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
 /// 直接使用原始 CGImage 绘制，避免 NSImage 转换导致色差/模糊。
-/// 左上角有亮绿色关闭按钮，悬停变红并显示X，点击关闭。
+/// 呼吸灯样式可配置：顶部 1pt 呼吸横条（默认，悬停贴图浮现关闭按钮）
+/// 或左上角圆点闪烁按钮（兼关闭入口），设置变更立即生效。
 final class PinWindow: NSWindow {
 
     /// 贴图关闭时回调（用于协调器从列表中移除、释放图片）。
     var onClose: (() -> Void)?
+
+    private var styleObserver: NSObjectProtocol?
 
     init(cgImage: CGImage, displaySize: NSSize, at point: CGPoint) {
         let frame = NSRect(x: point.x, y: point.y, width: displaySize.width, height: displaySize.height)
@@ -34,7 +37,24 @@ final class PinWindow: NSWindow {
         closeButton.onTap = { [weak self] in self?.closePin() }
         imageView.addCloseButton(closeButton)
 
+        // 呼吸灯样式：读取设置（默认顶部横条）
+        imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
+
+        // 设置变更立即生效于已打开的贴图
+        styleObserver = NotificationCenter.default.addObserver(
+            forName: .pinIndicatorStyleDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self = self, let imageView = self.contentView as? PinImageView else { return }
+            imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
+        }
+
         DiagLog.write("PinWindow: pts=\(displaySize) pixels=\(cgImage.width)x\(cgImage.height) backingScale=\(self.backingScaleFactor)")
+    }
+
+    deinit {
+        if let observer = styleObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     /// 关闭贴图并通知协调器释放资源。
@@ -45,11 +65,13 @@ final class PinWindow: NSWindow {
 }
 
 /// 贴图视图：直接用 CGContext.draw 绘制原始 CGImage，与覆盖层渲染方式一致。
-/// 处理拖拽移动 + 双击关闭。左上角有关闭按钮（悬停变红+X）。
+/// 处理拖拽移动 + 双击关闭。管理呼吸灯样式（横条/圆点）与关闭按钮。
 final class PinImageView: NSView {
 
     var cgImage: CGImage?
     private var closeButton: PinCloseButton?
+    private var indicatorBar: PinIndicatorBar?
+    private var hoverTrackingArea: NSTrackingArea?
     private var originalSize: CGSize = .zero
     private var currentScale: CGFloat = 1.0
 
@@ -71,6 +93,23 @@ final class PinImageView: NSView {
         ctx.draw(cg, in: bounds)
     }
 
+    /// 按呼吸灯样式应用指示器：横条模式显示顶部呼吸条、关闭按钮悬停浮现；
+    /// 圆点模式移除横条、按钮常驻闪烁。可重复调用。
+    func applyIndicatorStyle(_ style: PinIndicatorStyle) {
+        closeButton?.setMode(PinCloseButtonState.Mode(style))
+        if style == .topBar {
+            if indicatorBar == nil {
+                let bar = PinIndicatorBar()
+                addSubview(bar)
+                indicatorBar = bar
+                updateIndicatorBarFrame()
+            }
+        } else {
+            indicatorBar?.removeFromSuperview()
+            indicatorBar = nil
+        }
+    }
+
     /// 添加关闭按钮到左上角。
     func addCloseButton(_ button: PinCloseButton) {
         closeButton = button
@@ -84,6 +123,34 @@ final class PinImageView: NSView {
         guard let btn = closeButton else { return }
         btn.frame = PinScaler.scaledButtonFrame(viewBounds: bounds, scaleFactor: currentScale)
         btn.needsDisplay = true
+    }
+
+    /// 顶部横条 frame：高 1pt，宽度与图片等宽（视图原点左下，顶部 = maxY）。
+    private func updateIndicatorBarFrame() {
+        guard let bar = indicatorBar else { return }
+        bar.frame = NSRect(x: 0, y: bounds.height - PinIndicatorBar.barHeight,
+                           width: bounds.width, height: PinIndicatorBar.barHeight)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea { removeTrackingArea(area) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        closeButton?.setImageHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        closeButton?.setImageHovered(false)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -128,7 +195,56 @@ final class PinImageView: NSView {
     }
 }
 
-/// 贴图关闭按钮：左上角亮绿色圆形按钮，悬停变红并显示X，点击关闭。
+/// 顶部 1pt 呼吸横条：贴在贴图最上端，宽度与图片等宽。
+/// 用 Core Animation 透明度渐变实现渐亮渐暗，无需定时器重绘。
+final class PinIndicatorBar: NSView {
+
+    static let barHeight: CGFloat = 1
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: PinIndicatorBar.barHeight))
+        wantsLayer = true
+        autoresizingMask = [.width, .minYMargin]
+    }
+
+    required init?(coder: NSCoder) { fatalError("unsupported") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            startBreathing()
+        } else {
+            layer?.removeAnimation(forKey: "breathing")
+        }
+    }
+
+    /// 渐亮（1.2s）→ 渐暗（1.2s）循环，缓入缓出。
+    private func startBreathing() {
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 0.15
+        anim.toValue = 1.0
+        anim.duration = 1.2
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer?.add(anim, forKey: "breathing")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.setFillColor(NSColor(calibratedRed: 0.30, green: 0.85, blue: 0.31, alpha: 0.90).cgColor)
+        ctx.fill(bounds)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+}
+
+/// 贴图关闭按钮：左上角圆形按钮，点击关闭。
+/// 圆点模式：亮绿色闪烁，悬停变红并显示X；横条模式：悬停贴图时淡入红色X。
 final class PinCloseButton: NSView {
 
     var onTap: (() -> Void)?
@@ -138,13 +254,42 @@ final class PinCloseButton: NSView {
 
     override var isFlipped: Bool { true }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window != nil {
+    /// 切换指示样式模式（横条/圆点），重置可见性与闪烁。
+    func setMode(_ mode: PinCloseButtonState.Mode) {
+        state.setMode(mode)
+        updateBlinking()
+        applyVisibility()
+    }
+
+    /// 横条模式：由贴图悬停状态驱动浮现/隐藏；圆点模式下忽略。
+    func setImageHovered(_ hovered: Bool) {
+        guard state.mode == .topBar else { return }
+        hovered ? state.onImageHoverEnter() : state.onImageHoverExit()
+        applyVisibility()
+    }
+
+    private func updateBlinking() {
+        if state.mode == .cornerDot && window != nil {
             startBlinking()
         } else {
             stopBlinking()
         }
+    }
+
+    /// 可见性淡入淡出（横条模式浮现/隐藏，0.15s）。
+    private func applyVisibility() {
+        let target: CGFloat = state.isVisible ? 1 : 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            animator().alphaValue = target
+        }
+        needsDisplay = true
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateBlinking()
     }
 
     private func startBlinking() {
@@ -176,16 +321,20 @@ final class PinCloseButton: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard state.mode == .cornerDot else { return }
         state.onHoverEnter()
         needsDisplay = true
     }
 
     override func mouseExited(with event: NSEvent) {
+        guard state.mode == .cornerDot else { return }
         state.onHoverExit()
         needsDisplay = true
     }
 
     override func mouseDown(with event: NSEvent) {
+        // 横条模式隐藏时不拦截点击（交给贴图拖拽）
+        if state.mode == .topBar && !state.isVisible { return }
         onTap?()
     }
 

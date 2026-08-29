@@ -51,4 +51,46 @@ final class PinCloseButtonStateTests: XCTestCase {
         state.onHoverExit()
         XCTAssertTrue(state.isVisible, "离开悬停后重置为可见")
     }
+
+    // MARK: - topBar 模式（顶部横条呼吸灯）
+
+    func test_topBarMode_initiallyHidden() {
+        let state = PinCloseButtonState(mode: .topBar)
+        XCTAssertFalse(state.isVisible, "横条模式下按钮默认隐藏，悬停贴图才浮现")
+        XCTAssertTrue(state.showsX, "横条模式浮现时直接显示 X")
+        XCTAssertEqual(state.color, .red, "横条模式浮现时为红色")
+    }
+
+    func test_topBarMode_imageHoverEnter_reveals() {
+        var state = PinCloseButtonState(mode: .topBar)
+        state.onImageHoverEnter()
+        XCTAssertTrue(state.isVisible, "悬停贴图时浮现关闭按钮")
+        XCTAssertEqual(state.color, .red)
+        XCTAssertTrue(state.showsX)
+    }
+
+    func test_topBarMode_imageHoverExit_hides() {
+        var state = PinCloseButtonState(mode: .topBar)
+        state.onImageHoverEnter()
+        state.onImageHoverExit()
+        XCTAssertFalse(state.isVisible, "移出贴图后按钮隐藏")
+    }
+
+    func test_topBarMode_blinkTick_doesNothing() {
+        var state = PinCloseButtonState(mode: .topBar)
+        state.onBlinkTick()
+        XCTAssertFalse(state.isVisible, "横条模式不闪烁，未悬停仍应隐藏")
+        state.onImageHoverEnter()
+        state.onBlinkTick()
+        XCTAssertTrue(state.isVisible, "悬停时闪烁回调不影响可见性")
+    }
+
+    func test_setMode_switchResetsToCleanState() {
+        var state = PinCloseButtonState(mode: .topBar)
+        state.onImageHoverEnter()
+        state.setMode(.cornerDot)
+        XCTAssertEqual(state.color, .green, "切回圆点模式应重置为初始绿色")
+        XCTAssertTrue(state.isVisible, "圆点模式初始闪烁可见")
+        XCTAssertFalse(state.showsX)
+    }
 }

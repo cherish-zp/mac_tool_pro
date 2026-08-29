@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventTapListener: CGEventTapHotkeyListener?
     private var permissionTimer: Timer?
     private var snippetManagerWindow: SnippetManagerWindow?
+    private var settingsWindow: SettingsWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -211,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "查看热键日志", action: #selector(showHotkeyLog), keyEquivalent: "")
 
         menu.addItem(.separator())
+        menu.addItem(withTitle: "设置…", action: #selector(showSettings), keyEquivalent: ",")
         menu.addItem(withTitle: "退出 mac_tool_pro", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
     }
@@ -268,5 +270,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             snippetManagerWindow = SnippetManagerWindow()
         }
         snippetManagerWindow?.showAndFocus()
+    }
+
+    @objc private func showSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindow()
+        }
+        settingsWindow?.showAndFocus()
     }
 }
