@@ -51,6 +51,7 @@ targets:
       - path: Tests/mac_tool_proTests
       - path: Sources/Shared
       - path: Sources/Modules
+      - path: Sources/App/Settings
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zp.mac-tool-pro.tests

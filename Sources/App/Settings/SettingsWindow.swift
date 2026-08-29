@@ -75,13 +75,14 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSTableViewDataSource, N
 
         // 右侧详情：贴图设置面板
         pinPane = PinSettingsPaneView()
-        pinPane.translatesAutoresizingMaskIntoConstraints = false
 
         split.addArrangedSubview(sidebar)
         split.addArrangedSubview(pinPane)
         split.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: 0)
         sidebar.widthAnchor.constraint(equalToConstant: 180).isActive = true
 
+        // arrangedSubview 的位置由 NSSplitView 内部约束管理；
+        // 手动钉边会与其冲突（面板被拉回 x=0 盖住侧栏，整窗错乱）。
         NSLayoutConstraint.activate([
             split.leadingAnchor.constraint(equalTo: bg.leadingAnchor),
             split.trailingAnchor.constraint(equalTo: bg.trailingAnchor),
@@ -92,11 +93,6 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSTableViewDataSource, N
             scroll.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: sidebar.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
-
-            pinPane.leadingAnchor.constraint(equalTo: pinPane.superview!.leadingAnchor),
-            pinPane.trailingAnchor.constraint(equalTo: pinPane.superview!.trailingAnchor),
-            pinPane.topAnchor.constraint(equalTo: pinPane.superview!.topAnchor),
-            pinPane.bottomAnchor.constraint(equalTo: pinPane.superview!.bottomAnchor),
         ])
 
         tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
