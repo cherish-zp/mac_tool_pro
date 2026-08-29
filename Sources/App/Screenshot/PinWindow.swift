@@ -41,6 +41,12 @@ final class PinWindow: NSWindow {
         // 呼吸灯样式：读取设置（默认顶部横条）
         imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
 
+        // 右键菜单：复制图片（复制动作走注入的 Pasteboard 抽象）
+        imageView.addContextMenu(PinContextMenu(
+            pasteboard: SystemPasteboard(),
+            imageProvider: { [weak imageView] in imageView?.cgImage }
+        ))
+
         // 设置变更立即生效于已打开的贴图
         styleObserver = NotificationCenter.default.addObserver(
             forName: .pinIndicatorStyleDidChange, object: nil, queue: .main
@@ -82,6 +88,12 @@ final class PinImageView: NSView {
     private var dragStartOrigin: NSPoint = .zero
     private var lastClickTime: Date = .distantPast
     private let doubleClickInterval: TimeInterval = 0.3
+    private var contextMenuController: PinContextMenu?
+
+    /// 挂接右键菜单控制器（窗口创建时注入，复制动作经 Pasteboard 抽象执行）。
+    func addContextMenu(_ controller: PinContextMenu) {
+        contextMenuController = controller
+    }
 
     /// 设置原始尺寸（初始化时调用），用于缩放基准。
     func setOriginalSize(_ size: CGSize) {
@@ -190,6 +202,13 @@ final class PinImageView: NSView {
             (window as? PinWindow)?.closePin()
         }
         lastClickTime = now
+    }
+
+    /// 右键弹出贴图菜单；NSView 的 rightMouseDown 独立于左键 mouseDown/mouseUp 事件流，
+    /// 不影响拖拽与双击关闭。
+    override func rightMouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        contextMenuController?.popUp(at: point, in: self)
     }
 
     /// 滚轮缩放：上滚放大、下滚缩小，等比例缩放，保持窗口中心不变。

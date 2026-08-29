@@ -35,5 +35,7 @@ final class CopyPathToolTests: XCTestCase {
 /// 测试用假剪贴板，记录最后一次写入内容。
 final class PasteboardSpy: Pasteboard {
     var copied: String?
+    var copiedImage: CGImage?
     func copy(_ string: String) { copied = string }
+    func copyImage(_ image: CGImage) { copiedImage = image }
 }
