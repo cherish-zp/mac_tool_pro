@@ -392,7 +392,15 @@ final class ScreenshotCoordinator {
         let screen = activeOverlay?.screen ?? NSScreen.main!
         let pinPoint = PinPositioner.pinPoint(selectionOrigin: sel.origin, screenFrame: screen.frame)
         DiagLog.write("pinToDesktop: sel=\(sel) screen=\(screen.frame) pinPoint=\(pinPoint)")
-        let pin = PinWindow(cgImage: cgImage, displaySize: sel.size, at: pinPoint)
+        // 与 renderFinalCGImage 相同口径的圆角半径（点），供呼吸灯贴合贴图圆角
+        let ptRadius: CGFloat
+        if let view = activeOverlay?.overlayView {
+            ptRadius = CornerRounding.clampedRadius(view.cornerRadius, for: sel.size)
+        } else {
+            ptRadius = 0
+        }
+        let pin = PinWindow(cgImage: cgImage, displaySize: sel.size, at: pinPoint,
+                            cornerRadius: ptRadius)
         pin.onClose = { [weak self, weak pin] in
             guard let pin = pin else { return }
             self?.pinWindows.removeAll { $0 === pin }
@@ -755,7 +763,7 @@ func toolbarDidScroll() {
             let scrollScreen = activeOverlay?.screen ?? NSScreen.main!
             let scrollPinPoint = PinPositioner.pinPoint(selectionOrigin: sel.origin, screenFrame: scrollScreen.frame)
             let pin = PinWindow(cgImage: cgImage, displaySize: image.size,
-                                at: scrollPinPoint)
+                                at: scrollPinPoint, cornerRadius: 0)
             pin.onClose = { [weak self, weak pin] in
                 guard let pin = pin else { return }
                 self?.pinWindows.removeAll { $0 === pin }

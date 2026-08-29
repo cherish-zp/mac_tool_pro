@@ -11,7 +11,7 @@ final class PinWindow: NSWindow {
 
     private var styleObserver: NSObjectProtocol?
 
-    init(cgImage: CGImage, displaySize: NSSize, at point: CGPoint) {
+    init(cgImage: CGImage, displaySize: NSSize, at point: CGPoint, cornerRadius: CGFloat = 0) {
         let frame = NSRect(x: point.x, y: point.y, width: displaySize.width, height: displaySize.height)
         super.init(
             contentRect: frame,
@@ -28,6 +28,7 @@ final class PinWindow: NSWindow {
 
         let imageView = PinImageView(frame: NSRect(origin: .zero, size: displaySize))
         imageView.cgImage = cgImage
+        imageView.baseCornerRadius = cornerRadius
         imageView.setOriginalSize(displaySize)
         imageView.autoresizingMask = [.width, .height]
         contentView = imageView
@@ -69,6 +70,8 @@ final class PinWindow: NSWindow {
 final class PinImageView: NSView {
 
     var cgImage: CGImage?
+    /// 贴图基础圆角半径（点，未缩放时口径），用于呼吸灯贴合图片圆角；0 表示直角。
+    var baseCornerRadius: CGFloat = 0
     private var closeButton: PinCloseButton?
     private var indicatorBar: PinIndicatorBar?
     private var hoverTrackingArea: NSTrackingArea?
@@ -97,9 +100,11 @@ final class PinImageView: NSView {
     /// 圆点模式移除横条、按钮常驻闪烁。可重复调用。
     func applyIndicatorStyle(_ style: PinIndicatorStyle) {
         closeButton?.setMode(PinCloseButtonState.Mode(style))
+        updateCloseButtonFrame()
         if style == .topBar {
             if indicatorBar == nil {
                 let bar = PinIndicatorBar()
+                bar.cornerRadius = baseCornerRadius * currentScale
                 addSubview(bar)
                 indicatorBar = bar
                 updateIndicatorBarFrame()
@@ -118,14 +123,20 @@ final class PinImageView: NSView {
         updateCloseButtonFrame()
     }
 
-    /// 根据当前缩放比例更新关闭按钮的位置和大小。
+    /// 根据当前缩放比例与模式更新关闭按钮的位置和大小。
+    /// 圆点模式用常规尺寸系（22pt），横条模式用减半的浮现按钮尺寸系。
     func updateCloseButtonFrame() {
         guard let btn = closeButton else { return }
-        btn.frame = PinScaler.scaledButtonFrame(viewBounds: bounds, scaleFactor: currentScale)
+        switch btn.mode {
+        case .cornerDot:
+            btn.frame = PinScaler.scaledButtonFrame(viewBounds: bounds, scaleFactor: currentScale)
+        case .topBar:
+            btn.frame = PinScaler.scaledRevealButtonFrame(viewBounds: bounds, scaleFactor: currentScale)
+        }
         btn.needsDisplay = true
     }
 
-    /// 顶部横条 frame：高 1pt，宽度与图片等宽（视图原点左下，顶部 = maxY）。
+    /// 顶部横条 frame：高 2pt，宽度与图片等宽（视图原点左下，顶部 = maxY）。
     private func updateIndicatorBarFrame() {
         guard let bar = indicatorBar else { return }
         bar.frame = NSRect(x: 0, y: bounds.height - PinIndicatorBar.barHeight,
@@ -192,14 +203,22 @@ final class PinImageView: NSView {
         let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: newSize)
         win.setFrame(newFrame, display: true)
         updateCloseButtonFrame()
+        indicatorBar?.cornerRadius = baseCornerRadius * currentScale
     }
 }
 
-/// 顶部 1pt 呼吸横条：贴在贴图最上端，宽度与图片等宽。
+/// 顶部 2pt 呼吸横条：贴在贴图最上端，宽度与图片等宽。
 /// 用 Core Animation 透明度渐变实现渐亮渐暗，无需定时器重绘。
+/// 绘制时把横条裁剪到「整张图片 bounds、半径 R」的圆角矩形路径内（R 随缩放同步更新），
+/// 使横条两端跟随贴图圆角弧度（贴图图片已按同口径烘焙圆角，四角透明）。
 final class PinIndicatorBar: NSView {
 
-    static let barHeight: CGFloat = 1
+    static let barHeight: CGFloat = 2
+
+    /// 贴图当前圆角半径（点，= baseRadius × currentScale），0 表示直角。
+    var cornerRadius: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -235,6 +254,14 @@ final class PinIndicatorBar: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.setFillColor(NSColor(calibratedRed: 0.30, green: 0.85, blue: 0.31, alpha: 0.90).cgColor)
+        if cornerRadius > 0 {
+            // bar 自身坐标系（isFlipped=true，顶边 y=0）：以 bar 顶边为圆角矩形顶边，
+            // 圆角在顶部两角，路径高度足够容纳整段圆弧；横条被裁剪后两端呈圆角。
+            let pathRect = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + cornerRadius)
+            ctx.addPath(CGPath(roundedRect: pathRect, cornerWidth: cornerRadius,
+                               cornerHeight: cornerRadius, transform: nil))
+            ctx.clip()
+        }
         ctx.fill(bounds)
     }
 
@@ -253,6 +280,9 @@ final class PinCloseButton: NSView {
     private var blinkTimer: Timer?
 
     override var isFlipped: Bool { true }
+
+    /// 当前指示样式模式（圆点/横条），供按模式选按钮尺寸系。
+    var mode: PinCloseButtonState.Mode { state.mode }
 
     /// 切换指示样式模式（横条/圆点），重置可见性与闪烁。
     func setMode(_ mode: PinCloseButtonState.Mode) {
@@ -349,12 +379,12 @@ final class PinCloseButton: NSView {
         ctx.setFillColor(bgColor.cgColor)
         ctx.fillEllipse(in: rect)
 
-        // 悬停时显示白色X
+        // 悬停时显示白色X（随按钮尺寸等比：22pt 时 r≈4、线宽≈2，与原视觉一致）
         if state.showsX {
             let center = NSPoint(x: bounds.midX, y: bounds.midY)
-            let r: CGFloat = 4
+            let r = bounds.width * 0.18
             ctx.setStrokeColor(NSColor.white.cgColor)
-            ctx.setLineWidth(2)
+            ctx.setLineWidth(Swift.max(1.5, bounds.width * 0.09))
             ctx.setLineCap(.round)
             ctx.move(to: NSPoint(x: center.x - r, y: center.y - r))
             ctx.addLine(to: NSPoint(x: center.x + r, y: center.y + r))

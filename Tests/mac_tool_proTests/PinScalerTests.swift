@@ -78,4 +78,32 @@ final class PinScalerTests: XCTestCase {
         XCTAssertEqual(frame.origin.y, bounds.height - expectedMargin - expectedSize, accuracy: 0.001)
     }
 
+    // MARK: - 悬停浮现按钮（topBar 模式，尺寸减半）
+
+    func test_scaledRevealButtonSize_isHalfOfRegularButtonSize() {
+        XCTAssertEqual(PinScaler.scaledRevealButtonSize(scaleFactor: 1.0), 11, accuracy: 0.001)
+        XCTAssertEqual(PinScaler.scaledRevealButtonSize(scaleFactor: 2.0), 22, accuracy: 0.001)
+        XCTAssertEqual(PinScaler.scaledRevealButtonSize(scaleFactor: 0.75), 8.25, accuracy: 0.001)
+    }
+
+    func test_scaledRevealButtonSize_clampedMin() {
+        XCTAssertEqual(PinScaler.minRevealButtonSize, 8, accuracy: 0.001)
+        XCTAssertEqual(PinScaler.scaledRevealButtonSize(scaleFactor: 0.5), PinScaler.minRevealButtonSize, accuracy: 0.001)
+    }
+
+    func test_scaledRevealButtonSize_clampedMax() {
+        XCTAssertEqual(PinScaler.maxRevealButtonSize, 30, accuracy: 0.001)
+        XCTAssertEqual(PinScaler.scaledRevealButtonSize(scaleFactor: 10.0), PinScaler.maxRevealButtonSize, accuracy: 0.001)
+    }
+
+    func test_scaledRevealButtonFrame_topLeftPosition() {
+        // isFlipped=false，左上角 = (margin*s, height - margin*s - size)，定位逻辑与常规按钮一致
+        let bounds = CGRect(x: 0, y: 0, width: 300, height: 200)
+        let frame = PinScaler.scaledRevealButtonFrame(viewBounds: bounds, scaleFactor: 2.0)
+        XCTAssertEqual(frame.width, 22, accuracy: 0.001)   // 11*2
+        XCTAssertEqual(frame.height, 22, accuracy: 0.001)
+        XCTAssertEqual(frame.origin.x, 8, accuracy: 0.001) // 4*2
+        XCTAssertEqual(frame.origin.y, bounds.height - 8 - 22, accuracy: 0.001)
+    }
+
 }

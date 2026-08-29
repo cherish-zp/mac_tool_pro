@@ -54,4 +54,29 @@ public enum PinScaler {
                       y: viewBounds.height - margin - size,
                       width: size, height: size)
     }
+
+    // MARK: - 悬停浮现按钮（topBar 模式，尺寸减半）
+
+    /// 悬停浮现按钮原始尺寸（点），为常规关闭按钮（22）的一半。
+    public static let originalRevealButtonSize: CGFloat = 11
+    /// 悬停浮现按钮最小尺寸（点），防止过小无法点击。
+    public static let minRevealButtonSize: CGFloat = 8
+    /// 悬停浮现按钮最大尺寸（点），防止过大遮挡图片。
+    public static let maxRevealButtonSize: CGFloat = 30
+
+    /// 根据缩放因子计算悬停浮现按钮尺寸（限制在 min/max 范围内）。
+    public static func scaledRevealButtonSize(scaleFactor: CGFloat) -> CGFloat {
+        let raw = originalRevealButtonSize * scaleFactor
+        return Swift.max(minRevealButtonSize, Swift.min(maxRevealButtonSize, raw))
+    }
+
+    /// 计算悬停浮现按钮在视图中的 frame（左上角，等比例缩放，边距与常规按钮一致）。
+    /// 视图 isFlipped=false（原点左下），左上角 = (margin*s, height - margin*s - size)。
+    public static func scaledRevealButtonFrame(viewBounds: CGRect, scaleFactor: CGFloat) -> CGRect {
+        let size = scaledRevealButtonSize(scaleFactor: scaleFactor)
+        let margin = originalMargin * scaleFactor
+        return CGRect(x: margin,
+                      y: viewBounds.height - margin - size,
+                      width: size, height: size)
+    }
 }
