@@ -58,4 +58,73 @@ final class SettingsWindowLayoutTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - 面板内部控件（用户可见的叠压回归）
+
+    /// 收集面板内关键控件的「面板坐标系」frame：标题/说明标签 + 全部单选按钮。
+    private func paneControls(in pane: NSView) -> [(name: String, frame: NSRect)] {
+        var controls: [(name: String, frame: NSRect)] = []
+
+        func walk(_ view: NSView) {
+            for sub in view.subviews {
+                if let button = sub as? NSButton {
+                    controls.append((button.title, button.superview!.convert(button.frame, to: pane)))
+                } else if let label = sub as? NSTextField, sub.superview is NSStackView {
+                    controls.append((label.stringValue, label.superview!.convert(label.frame, to: pane)))
+                }
+                walk(sub)
+            }
+        }
+        walk(pane)
+        return controls
+    }
+
+    func test_layout_paneControlsDoNotOverlapEachOther() {
+        let split = makeLaidOutSplitView()
+        let pane = split.arrangedSubviews[1]
+        let controls = paneControls(in: pane)
+
+        XCTAssertGreaterThanOrEqual(
+            controls.count, 4,
+            "面板内应找到标题、说明与两个单选按钮（实际 \(controls.count) 个）"
+        )
+
+        for i in 0..<controls.count {
+            for j in (i + 1)..<controls.count {
+                let a = controls[i].frame.insetBy(dx: 1, dy: 1)
+                let b = controls[j].frame.insetBy(dx: 1, dy: 1)
+                XCTAssertFalse(
+                    a.intersects(b),
+                    "「\(controls[i].name)」与「\(controls[j].name)」在面板内重叠：\(controls[i].frame) vs \(controls[j].frame)"
+                )
+            }
+        }
+    }
+
+    func test_layout_groupBoxContainsBothRadios() {
+        let split = makeLaidOutSplitView()
+        let pane = split.arrangedSubviews[1]
+
+        guard let box = findGroupBox(in: pane) else {
+            return XCTFail("面板内应存在「呼吸灯样式」分组框")
+        }
+        let radios = paneControls(in: pane).filter { $0.name == "顶部横条呼吸灯" || $0.name == "左上角圆点" }
+        XCTAssertEqual(radios.count, 2, "应有两个呼吸灯样式单选按钮")
+
+        for radio in radios {
+            let frameInBox = box.convert(radio.frame, from: pane)
+            XCTAssertTrue(
+                box.bounds.insetBy(dx: 2, dy: 2).contains(frameInBox),
+                "单选按钮「\(radio.name)」溢出分组框：box.bounds=\(box.bounds) radio=\(frameInBox)"
+            )
+        }
+    }
+
+    private func findGroupBox(in view: NSView) -> NSBox? {
+        if let box = view as? NSBox { return box }
+        for sub in view.subviews {
+            if let found = findGroupBox(in: sub) { return found }
+        }
+        return nil
+    }
 }

@@ -157,11 +157,23 @@ final class PinSettingsPaneView: NSView {
         radioStack.orientation = .vertical
         radioStack.alignment = .leading
         radioStack.spacing = 10
+        // 作为 NSBox.contentView 必须用 Auto Layout，否则 box 无法据内容计算高度，
+        // 会塌缩成仅剩标题条（16pt），单选按钮溢出并与面板其他元素叠压
+        radioStack.translatesAutoresizingMaskIntoConstraints = false
 
         let box = NSBox()
         box.title = "呼吸灯样式"
         box.titleFont = .systemFont(ofSize: 13, weight: .medium)
         box.contentView = radioStack
+        // NSBox 不会据替换后的 contentView 自动撑高（会塌缩成仅剩 16pt 标题条，
+        // 内容溢出并与面板其他元素叠压），显式把边框绑定到内容：
+        // 顶部常数 = 标题区高度，其余 = 内容边距
+        NSLayoutConstraint.activate([
+            box.topAnchor.constraint(equalTo: radioStack.topAnchor, constant: -26),
+            box.bottomAnchor.constraint(equalTo: radioStack.bottomAnchor, constant: 12),
+            box.leadingAnchor.constraint(equalTo: radioStack.leadingAnchor, constant: -12),
+            box.trailingAnchor.constraint(equalTo: radioStack.trailingAnchor, constant: 12),
+        ])
 
         let stack = NSStackView(views: [titleLabel, hintLabel, box])
         stack.orientation = .vertical
@@ -175,7 +187,6 @@ final class PinSettingsPaneView: NSView {
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 24),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -24),
-            box.widthAnchor.constraint(equalToConstant: 300),
         ])
     }
 
