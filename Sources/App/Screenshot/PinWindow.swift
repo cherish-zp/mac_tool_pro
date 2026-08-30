@@ -2,8 +2,8 @@ import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
 /// 直接使用原始 CGImage 绘制，避免 NSImage 转换导致色差/模糊。
-/// 呼吸灯样式可配置：顶部 2pt 呼吸横条（默认，悬停贴图浮现关闭按钮）
-/// 或左上角圆点闪烁按钮（兼关闭入口），设置变更立即生效。
+/// 呼吸灯样式可配置（横条/圆点），横条的高度/距顶部间距/颜色均可在设置中调整，
+/// 设置变更立即生效。
 final class PinWindow: NSWindow {
 
     /// 贴图关闭时回调（用于协调器从列表中移除、释放图片）。
@@ -38,8 +38,8 @@ final class PinWindow: NSWindow {
         closeButton.onTap = { [weak self] in self?.closePin() }
         imageView.addCloseButton(closeButton)
 
-        // 呼吸灯样式：读取设置（默认顶部横条）
-        imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
+        // 呼吸灯样式与外观：读取设置（默认顶部横条，高 4pt、距顶 2pt、绿色）
+        imageView.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
 
         // 右键菜单：复制图片（复制动作走注入的 Pasteboard 抽象；
         // pointSize 取贴图原始点尺寸（未缩放），与工具条复制的逻辑尺寸口径一致）
@@ -54,7 +54,7 @@ final class PinWindow: NSWindow {
             forName: .pinIndicatorStyleDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self = self, let imageView = self.contentView as? PinImageView else { return }
-            imageView.applyIndicatorStyle(PinSettingsStore.defaultStore().load().indicatorStyle)
+            imageView.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
         }
 
         DiagLog.write("PinWindow: pts=\(displaySize) pixels=\(cgImage.width)x\(cgImage.height) backingScale=\(self.backingScaleFactor)")
@@ -112,19 +112,23 @@ final class PinImageView: NSView {
         ctx.draw(cg, in: bounds)
     }
 
-    /// 按呼吸灯样式应用指示器：横条模式显示顶部呼吸条、关闭按钮悬停浮现；
-    /// 圆点模式移除横条、按钮常驻闪烁。可重复调用。
-    func applyIndicatorStyle(_ style: PinIndicatorStyle) {
-        closeButton?.setMode(PinCloseButtonState.Mode(style))
+    /// 按设置应用呼吸灯：样式（横条/圆点）+ 横条外观（高度/距顶部间距/颜色）。
+    /// 可重复调用（初始化与设置变更通知共用）。
+    func applyIndicatorSettings(_ settings: PinSettingsState) {
+        closeButton?.setMode(PinCloseButtonState.Mode(settings.indicatorStyle))
         updateCloseButtonFrame()
-        if style == .topBar {
+        if settings.indicatorStyle == .topBar {
             if indicatorBar == nil {
                 let bar = PinIndicatorBar()
-                bar.cornerRadius = baseCornerRadius * currentScale
                 addSubview(bar)
                 indicatorBar = bar
-                updateIndicatorBarFrame()
             }
+            indicatorBar?.barHeight = settings.indicatorHeight
+            indicatorBar?.topInset = settings.indicatorTopInset
+            indicatorBar?.color = PinIndicatorColor.color(fromHex: settings.indicatorColorHex)
+                ?? PinIndicatorColor.color(fromHex: PinIndicatorColor.defaultHex)!
+            indicatorBar?.silhouetteRadius = baseCornerRadius * currentScale
+            updateIndicatorBarFrame()
         } else {
             indicatorBar?.removeFromSuperview()
             indicatorBar = nil
@@ -152,11 +156,13 @@ final class PinImageView: NSView {
         btn.needsDisplay = true
     }
 
-    /// 顶部横条 frame：高 2pt，宽度与图片等宽（视图原点左下，顶部 = maxY）。
+    /// 顶部横条 frame：高度与距顶间距来自设置（视图原点左下，顶部 = maxY）。
     private func updateIndicatorBarFrame() {
         guard let bar = indicatorBar else { return }
-        bar.frame = NSRect(x: 0, y: bounds.height - PinIndicatorBar.barHeight,
-                           width: bounds.width, height: PinIndicatorBar.barHeight)
+        bar.frame = NSRect(x: 0,
+                           y: bounds.height - bar.topInset - bar.barHeight,
+                           width: bounds.width,
+                           height: bar.barHeight)
     }
 
     override func updateTrackingAreas() {
@@ -226,27 +232,34 @@ final class PinImageView: NSView {
         let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: newSize)
         win.setFrame(newFrame, display: true)
         updateCloseButtonFrame()
-        indicatorBar?.cornerRadius = baseCornerRadius * currentScale
+        indicatorBar?.silhouetteRadius = baseCornerRadius * currentScale
     }
 }
 
-/// 顶部 2pt 呼吸横条：贴在贴图最上端，宽度与图片等宽。
+/// 顶部呼吸横条：胶囊形浮动条，距贴图顶部间距与高度、颜色均来自设置。
 /// 用 Core Animation 透明度渐变实现渐亮渐暗，无需定时器重绘。
-/// 绘制时把横条裁剪到「整张图片 bounds、半径 R」的圆角矩形路径内（R 随缩放同步更新），
-/// 使横条两端跟随贴图圆角弧度（贴图图片已按同口径烘焙圆角，四角透明）。
+/// 两端除胶囊圆角外再经「贴图轮廓（圆角矩形）」裁剪，保证不越过贴图圆角外的透明区域。
 final class PinIndicatorBar: NSView {
 
-    static let barHeight: CGFloat = 2
-
-    /// 贴图当前圆角半径（点，= baseRadius × currentScale），0 表示直角。
-    var cornerRadius: CGFloat = 0 {
+    /// 横条高度（点），来自设置。
+    var barHeight: CGFloat = PinIndicatorAppearance.defaultHeight {
+        didSet { needsDisplay = true }
+    }
+    /// 距贴图顶部间距（点），同时用于轮廓裁剪定位。
+    var topInset: CGFloat = PinIndicatorAppearance.defaultTopInset
+    /// 横条颜色，来自设置色板。
+    var color: NSColor = PinIndicatorColor.color(fromHex: PinIndicatorColor.defaultHex)! {
+        didSet { needsDisplay = true }
+    }
+    /// 贴图当前圆角半径（点，= baseRadius × currentScale），0 表示直角贴图。
+    var silhouetteRadius: CGFloat = 0 {
         didSet { needsDisplay = true }
     }
 
     override var isFlipped: Bool { true }
 
     init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: 0, height: PinIndicatorBar.barHeight))
+        super.init(frame: .zero)
         wantsLayer = true
         autoresizingMask = [.width, .minYMargin]
     }
@@ -276,15 +289,20 @@ final class PinIndicatorBar: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        ctx.setFillColor(NSColor(calibratedRed: 0.30, green: 0.85, blue: 0.31, alpha: 0.90).cgColor)
-        if cornerRadius > 0 {
-            // bar 自身坐标系（isFlipped=true，顶边 y=0）：以 bar 顶边为圆角矩形顶边，
-            // 圆角在顶部两角，路径高度足够容纳整段圆弧；横条被裁剪后两端呈圆角。
-            let pathRect = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + cornerRadius)
-            ctx.addPath(CGPath(roundedRect: pathRect, cornerWidth: cornerRadius,
-                               cornerHeight: cornerRadius, transform: nil))
+        // 贴图轮廓裁剪：圆角矩形顶边在横条顶边上方 topInset 处（横条自身坐标系 y 向下）
+        if silhouetteRadius > 0 {
+            let silhouette = NSRect(x: 0, y: -topInset, width: bounds.width,
+                                    height: bounds.height + topInset + silhouetteRadius + 8)
+            ctx.addPath(CGPath(roundedRect: silhouette, cornerWidth: silhouetteRadius,
+                               cornerHeight: silhouetteRadius, transform: nil))
             ctx.clip()
         }
+        // 胶囊形状（圆角 = 高度一半）
+        let capsule = CGPath(roundedRect: bounds, cornerWidth: bounds.height / 2,
+                             cornerHeight: bounds.height / 2, transform: nil)
+        ctx.addPath(capsule)
+        ctx.clip()
+        ctx.setFillColor(color.cgColor)
         ctx.fill(bounds)
     }
 

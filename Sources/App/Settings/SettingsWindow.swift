@@ -124,11 +124,18 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSTableViewDataSource, N
     }
 }
 
-/// 贴图设置面板：呼吸灯样式单选，更改立即保存并通知已打开贴图。
+/// 贴图设置面板：呼吸灯样式与外观（高度/距顶部距离/颜色），
+/// 更改立即保存并通知已打开贴图。
 final class PinSettingsPaneView: NSView {
 
     private let topBarRadio: NSButton
     private let cornerDotRadio: NSButton
+    private var heightSlider: NSSlider!
+    private var topInsetSlider: NSSlider!
+    private var heightValueLabel: NSTextField!
+    private var topInsetValueLabel: NSTextField!
+    private var swatchButtons: [NSButton] = []
+    private var selectedColorHex: String = PinIndicatorColor.defaultHex
 
     init() {
         topBarRadio = NSButton(radioButtonWithTitle: "顶部横条呼吸灯", target: nil, action: nil)
@@ -139,6 +146,8 @@ final class PinSettingsPaneView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("unsupported") }
+
+    // MARK: - UI 构建
 
     private func buildUI() {
         let titleLabel = NSTextField(labelWithString: "贴图")
@@ -161,21 +170,49 @@ final class PinSettingsPaneView: NSView {
         // 会塌缩成仅剩标题条（16pt），单选按钮溢出并与面板其他元素叠压
         radioStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let box = NSBox()
-        box.title = "呼吸灯样式"
-        box.titleFont = .systemFont(ofSize: 13, weight: .medium)
-        box.contentView = radioStack
-        // NSBox 不会据替换后的 contentView 自动撑高（会塌缩成仅剩 16pt 标题条，
-        // 内容溢出并与面板其他元素叠压），显式把边框绑定到内容：
-        // 顶部常数 = 标题区高度，其余 = 内容边距
-        NSLayoutConstraint.activate([
-            box.topAnchor.constraint(equalTo: radioStack.topAnchor, constant: -26),
-            box.bottomAnchor.constraint(equalTo: radioStack.bottomAnchor, constant: 12),
-            box.leadingAnchor.constraint(equalTo: radioStack.leadingAnchor, constant: -12),
-            box.trailingAnchor.constraint(equalTo: radioStack.trailingAnchor, constant: 12),
-        ])
+        let styleBox = makeGroupBox(title: "呼吸灯样式", content: radioStack)
 
-        let stack = NSStackView(views: [titleLabel, hintLabel, box])
+        // 呼吸灯外观（仅顶部横条样式生效）
+        heightSlider = NSSlider(value: Double(PinIndicatorAppearance.defaultHeight),
+                                minValue: Double(PinIndicatorAppearance.heightRange.lowerBound),
+                                maxValue: Double(PinIndicatorAppearance.heightRange.upperBound),
+                                target: self, action: #selector(appearanceChanged(_:)))
+        topInsetSlider = NSSlider(value: Double(PinIndicatorAppearance.defaultTopInset),
+                                  minValue: Double(PinIndicatorAppearance.topInsetRange.lowerBound),
+                                  maxValue: Double(PinIndicatorAppearance.topInsetRange.upperBound),
+                                  target: self, action: #selector(appearanceChanged(_:)))
+        heightValueLabel = NSTextField(labelWithString: "\(PinIndicatorAppearance.defaultHeight)pt")
+        topInsetValueLabel = NSTextField(labelWithString: "\(PinIndicatorAppearance.defaultTopInset)pt")
+        let valueLabels: [NSTextField] = [heightValueLabel, topInsetValueLabel]
+        for label in valueLabels {
+            label.font = .systemFont(ofSize: 12)
+            label.textColor = .secondaryLabelColor
+        }
+
+        heightSlider.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        topInsetSlider.widthAnchor.constraint(equalToConstant: 140).isActive = true
+
+        let heightRow = makeRow(label: "呼吸灯高度", controls: [heightSlider, heightValueLabel])
+        let insetRow = makeRow(label: "距顶部距离", controls: [topInsetSlider, topInsetValueLabel])
+
+        var swatches: [NSView] = []
+        for hex in PinIndicatorColor.paletteHexes {
+            swatches.append(makeSwatch(hex: hex))
+        }
+        let swatchStack = NSStackView(views: swatches)
+        swatchStack.orientation = .horizontal
+        swatchStack.spacing = 8
+        let colorRow = makeRow(label: "颜色", controls: [swatchStack])
+
+        let appearanceStack = NSStackView(views: [heightRow, insetRow, colorRow])
+        appearanceStack.orientation = .vertical
+        appearanceStack.alignment = .leading
+        appearanceStack.spacing = 10
+        appearanceStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let appearanceBox = makeGroupBox(title: "呼吸灯外观", content: appearanceStack)
+
+        let stack = NSStackView(views: [titleLabel, hintLabel, styleBox, appearanceBox])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -190,15 +227,101 @@ final class PinSettingsPaneView: NSView {
         ])
     }
 
+    /// 分组框：NSBox 不会据替换后的 contentView 自动撑高（会塌缩成仅剩 16pt 标题条，
+    /// 内容溢出叠压），必须启用内容 Auto Layout 并显式把边框绑定到内容。
+    /// 顶部常数 = 标题区高度，其余 = 内容边距。
+    private func makeGroupBox(title: String, content: NSView) -> NSBox {
+        let box = NSBox()
+        box.title = title
+        box.titleFont = .systemFont(ofSize: 13, weight: .medium)
+        box.contentView = content
+        NSLayoutConstraint.activate([
+            box.topAnchor.constraint(equalTo: content.topAnchor, constant: -26),
+            box.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: 12),
+            box.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: -12),
+            box.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: 12),
+        ])
+        return box
+    }
+
+    /// 设置行：左对齐固定宽度标签 + 控件。
+    private func makeRow(label title: String, controls: [NSView]) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13)
+        label.widthAnchor.constraint(equalToConstant: 76).isActive = true
+        let row = NSStackView(views: [label] + controls)
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return row
+    }
+
+    /// 颜色色块：18pt 圆形按钮，选中时描边。
+    private func makeSwatch(hex: String) -> NSButton {
+        let button = NSButton(title: "", target: self, action: #selector(swatchClicked(_:)))
+        button.isBordered = false
+        button.identifier = NSUserInterfaceItemIdentifier(hex)
+        button.wantsLayer = true
+        button.layer?.backgroundColor = PinIndicatorColor.color(fromHex: hex)?.cgColor
+        button.layer?.cornerRadius = 9
+        button.layer?.borderWidth = 0
+        button.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        swatchButtons.append(button)
+        return button
+    }
+
+    // MARK: - 状态同步
+
+    private func syncFromStore() {
+        let state = PinSettingsStore.defaultStore().load()
+        topBarRadio.state = state.indicatorStyle == .topBar ? .on : .off
+        cornerDotRadio.state = state.indicatorStyle == .cornerDot ? .on : .off
+        heightSlider.integerValue = Int(state.indicatorHeight)
+        topInsetSlider.integerValue = Int(state.indicatorTopInset)
+        heightValueLabel.stringValue = "\(Int(state.indicatorHeight))pt"
+        topInsetValueLabel.stringValue = "\(Int(state.indicatorTopInset))pt"
+        selectedColorHex = state.indicatorColorHex
+        updateSwatchSelection()
+    }
+
+    private func updateSwatchSelection() {
+        for button in swatchButtons {
+            let selected = button.identifier?.rawValue == selectedColorHex
+            button.layer?.borderWidth = selected ? 2 : 0
+            button.layer?.borderColor = NSColor.controlAccentColor.cgColor
+        }
+    }
+
+    // MARK: - 动作
+
     @objc private func styleChanged(_ sender: NSButton) {
         let style: PinIndicatorStyle = sender == topBarRadio ? .topBar : .cornerDot
-        PinSettingsStore.defaultStore().save(PinSettingsState(indicatorStyle: style))
+        var state = PinSettingsStore.defaultStore().load()
+        state.indicatorStyle = style
+        PinSettingsStore.defaultStore().save(state)
         NotificationCenter.default.post(name: .pinIndicatorStyleDidChange, object: nil)
     }
 
-    private func syncFromStore() {
-        let style = PinSettingsStore.defaultStore().load().indicatorStyle
-        topBarRadio.state = style == .topBar ? .on : .off
-        cornerDotRadio.state = style == .cornerDot ? .on : .off
+    @objc private func swatchClicked(_ sender: NSButton) {
+        guard let hex = sender.identifier?.rawValue else { return }
+        selectedColorHex = hex
+        updateSwatchSelection()
+        persistAppearance()
+    }
+
+    @objc private func appearanceChanged(_ sender: NSSlider) {
+        heightValueLabel.stringValue = "\(heightSlider.integerValue)pt"
+        topInsetValueLabel.stringValue = "\(topInsetSlider.integerValue)pt"
+        persistAppearance()
+    }
+
+    private func persistAppearance() {
+        var state = PinSettingsStore.defaultStore().load()
+        state.indicatorHeight = CGFloat(heightSlider.integerValue)
+        state.indicatorTopInset = CGFloat(topInsetSlider.integerValue)
+        state.indicatorColorHex = selectedColorHex
+        PinSettingsStore.defaultStore().save(state)
+        NotificationCenter.default.post(name: .pinIndicatorStyleDidChange, object: nil)
     }
 }

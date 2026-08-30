@@ -8,18 +8,68 @@ public extension Notification.Name {
 
 /// 贴图呼吸灯样式：顶部横条（默认）或左上角圆点。
 public enum PinIndicatorStyle: String, Codable, Equatable, CaseIterable {
-    /// 顶部 2pt 横条呼吸灯，宽度与贴图等宽。
+    /// 顶部横条呼吸灯，宽度与贴图等宽，高度/距顶部距离/颜色可配置。
     case topBar
     /// 左上角圆点闪烁指示（兼关闭按钮）。
     case cornerDot
 }
 
+/// 呼吸灯横条外观取值范围与默认值（纯逻辑，便于单测）。
+public enum PinIndicatorAppearance {
+    /// 默认呼吸灯高度（点）。
+    public static let defaultHeight: CGFloat = 4
+    /// 默认距贴图顶部间距（点）。
+    public static let defaultTopInset: CGFloat = 2
+    /// 呼吸灯高度可调范围。
+    public static let heightRange: ClosedRange<CGFloat> = 1...8
+    /// 距顶部间距可调范围。
+    public static let topInsetRange: ClosedRange<CGFloat> = 0...10
+
+    public static func clamped(height: CGFloat) -> CGFloat {
+        Swift.max(heightRange.lowerBound, Swift.min(heightRange.upperBound, height))
+    }
+
+    public static func clamped(topInset: CGFloat) -> CGFloat {
+        Swift.max(topInsetRange.lowerBound, Swift.min(topInsetRange.upperBound, topInset))
+    }
+}
+
 /// 贴图设置状态（可扩展更多字段）。
+/// 解码时缺失字段回退默认（兼容旧版本配置文件）。
 public struct PinSettingsState: Codable, Equatable {
     public var indicatorStyle: PinIndicatorStyle
+    /// 呼吸灯横条高度（点）。
+    public var indicatorHeight: CGFloat
+    /// 呼吸灯横条距贴图顶部间距（点）。
+    public var indicatorTopInset: CGFloat
+    /// 呼吸灯颜色（hex，不含 #）。
+    public var indicatorColorHex: String
 
-    public init(indicatorStyle: PinIndicatorStyle = .topBar) {
+    public init(indicatorStyle: PinIndicatorStyle = .topBar,
+                indicatorHeight: CGFloat = PinIndicatorAppearance.defaultHeight,
+                indicatorTopInset: CGFloat = PinIndicatorAppearance.defaultTopInset,
+                indicatorColorHex: String = PinIndicatorColor.defaultHex) {
         self.indicatorStyle = indicatorStyle
+        self.indicatorHeight = PinIndicatorAppearance.clamped(height: indicatorHeight)
+        self.indicatorTopInset = PinIndicatorAppearance.clamped(topInset: indicatorTopInset)
+        self.indicatorColorHex = indicatorColorHex
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case indicatorStyle, indicatorHeight, indicatorTopInset, indicatorColorHex
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            indicatorStyle: try container.decodeIfPresent(PinIndicatorStyle.self, forKey: .indicatorStyle) ?? .topBar,
+            indicatorHeight: try container.decodeIfPresent(CGFloat.self, forKey: .indicatorHeight)
+                ?? PinIndicatorAppearance.defaultHeight,
+            indicatorTopInset: try container.decodeIfPresent(CGFloat.self, forKey: .indicatorTopInset)
+                ?? PinIndicatorAppearance.defaultTopInset,
+            indicatorColorHex: try container.decodeIfPresent(String.self, forKey: .indicatorColorHex)
+                ?? PinIndicatorColor.defaultHex
+        )
     }
 }
 
