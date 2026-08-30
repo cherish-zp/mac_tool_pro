@@ -64,6 +64,8 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSTableViewDataSource, N
         tableView.dataSource = self
         tableView.delegate = self
         tableView.allowsMultipleSelection = false
+        // 点击列表空白处不取消选中：取消选择会让右侧详情面板被误隐藏
+        tableView.allowsEmptySelection = false
         tableView.headerView = nil
         tableView.backgroundColor = .clear
         tableView.rowHeight = 44
@@ -118,9 +120,14 @@ final class SettingsWindow: NSWindow, NSWindowDelegate, NSTableViewDataSource, N
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        // 目前仅「贴图」一个分类；新增分类时在此切换右侧详情
         let row = tableView.selectedRow
-        pinPane.isHidden = row != 0
+        // 防御：空选择（row = -1，如点击列表空白/编程取消）恢复选中首项，避免右侧面板被误隐藏
+        guard row >= 0 else {
+            tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            return
+        }
+        // buildUI 早期（pinPane 尚未创建）也可能触发选中事件，容忍之
+        pinPane?.isHidden = row != 0
     }
 }
 

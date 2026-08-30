@@ -127,4 +127,41 @@ final class SettingsWindowLayoutTests: XCTestCase {
         }
         return nil
     }
+
+    // MARK: - 侧栏空白点击（回归：右侧面板被误隐藏）
+
+    private func findTableView(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        for sub in view.subviews {
+            if let found = findTableView(in: sub) { return found }
+        }
+        return nil
+    }
+
+    func test_sidebar_disallowEmptySelection() {
+        let window = SettingsWindow()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let tableView = findTableView(in: window.contentView!)
+        XCTAssertNotNil(tableView, "设置窗口内应有分类列表")
+        XCTAssertFalse(
+            tableView!.allowsEmptySelection,
+            "分类列表不允许空选择：点击列表空白处不应取消选中"
+        )
+    }
+
+    func test_sidebar_deselectKeepsPaneVisible() {
+        let window = SettingsWindow()
+        window.contentView?.layoutSubtreeIfNeeded()
+        let split = window.contentView!.subviews.compactMap({ $0 as? NSSplitView }).first!
+        let pane = split.arrangedSubviews[1]
+        guard let tableView = findTableView(in: window.contentView!) else {
+            return XCTFail("设置窗口内应有分类列表")
+        }
+
+        // 模拟点击列表空白处导致的取消选择（selectedRow → -1）
+        tableView.selectRowIndexes(IndexSet(), byExtendingSelection: false)
+
+        XCTAssertFalse(pane.isHidden, "取消选择时右侧详情面板不得消失")
+        XCTAssertEqual(tableView.selectedRow, 0, "取消选择后应恢复选中首项（贴图）")
+    }
 }
