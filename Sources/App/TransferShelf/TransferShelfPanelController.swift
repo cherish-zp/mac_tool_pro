@@ -12,6 +12,8 @@ final class TransferShelfPanelController: NSObject {
     private var hotZoneView: TransferShelfHotZoneView!
     private var hideWorkItem: DispatchWorkItem?
     private var isDragSessionActive = false
+    /// 面板可见期间的失效巡检定时器：文件被移走/删除后自动移除条目。
+    private var validityTimer: Timer?
 
     private var store = TransferShelfStore() {
         didSet { persist() }
@@ -26,6 +28,7 @@ final class TransferShelfPanelController: NSObject {
 
     /// 显示面板（贴住屏幕顶部中央，滑入动画）。
     func showPanel(manual: Bool = false) {
+        purgeInvalidItems()
         let toastPanel = panel ?? makePanel()
         panel = toastPanel
         position(toastPanel)
@@ -47,11 +50,13 @@ final class TransferShelfPanelController: NSObject {
         if !isDragSessionActive {
             scheduleHide(after: manual ? 5 : 3.5)
         }
+        startValidityTimer()
     }
 
     /// 全局拖拽会话开始：仅激活顶部热区，面板等文件真正拖入热区再出现，
     /// 避免拖动窗口等非文件拖拽时误弹面板。
     func dragSessionStarted() {
+        purgeInvalidItems()
         isDragSessionActive = true
         cancelScheduledHide()
         activateHotZone()
@@ -68,6 +73,33 @@ final class TransferShelfPanelController: NSObject {
         isDragSessionActive = false
         deactivateHotZone()
         scheduleHide(after: 3)
+    }
+
+    // MARK: - 失效条目清理
+
+    /// 移除文件已不存在（被移走/重命名/删除）的条目；有变化时刷新渲染并持久化。
+    private func purgeInvalidItems() {
+        guard !store.items.isEmpty else { return }
+        let removed = store.purgeInvalid { FileManager.default.fileExists(atPath: $0.path) }
+        guard !removed.isEmpty else { return }
+        DiagLog.write("TransferShelf purged \(removed.count) invalid item(s): \(removed.map(\.name).joined(separator: ", "))")
+        if let toastPanel = panel, toastPanel.isVisible {
+            shelfView.render(items: store.items)
+            position(toastPanel)
+        }
+    }
+
+    /// 面板可见期间开启失效巡检（每 2s），隐藏时停止。
+    private func startValidityTimer() {
+        stopValidityTimer()
+        validityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.purgeInvalidItems()
+        }
+    }
+
+    private func stopValidityTimer() {
+        validityTimer?.invalidate()
+        validityTimer = nil
     }
 
     // MARK: - 面板构建
@@ -213,6 +245,7 @@ final class TransferShelfPanelController: NSObject {
     }
 
     private func hidePanel() {
+        stopValidityTimer()
         guard let toastPanel = panel else { return }
         var endFrame = toastPanel.frame
         endFrame.origin.y += TransferShelfLayoutSpec.slideInOffset
@@ -281,6 +314,15 @@ final class TransferShelfPanelController: NSObject {
                 position(toastPanel)
             }
         }
+    }
+
+    /// 拖出兜底校验：文件在拖拽开始瞬间已不存在时返回 false 并移除该条目。
+    func validateItemForDrag(id: UUID) -> Bool {
+        guard let item = store.items.first(where: { $0.id == id }) else { return false }
+        if FileManager.default.fileExists(atPath: item.url.path) { return true }
+        DiagLog.write("TransferShelf drag blocked for missing file: \(item.name)")
+        removeItem(id: id)
+        return false
     }
 }
 
@@ -550,7 +592,9 @@ final class TransferShelfItemView: NSView {
 
     /// 拖动：把暂存文件拖出到 Finder/其他 App。
     /// 必须设置非零 draggingFrame 与图像组件，否则 beginDraggingSession 抛异常导致崩溃。
+    /// 文件已被移走/删除时不开启拖拽会话（无法落盘），直接从中转站移除该条目。
     override func mouseDragged(with event: NSEvent) {
+        guard TransferShelfPanelController.shared.validateItemForDrag(id: item.id) else { return }
         let pasteboardItem = NSPasteboardItem()
         pasteboardItem.setString(item.url.absoluteString, forType: .fileURL)
 

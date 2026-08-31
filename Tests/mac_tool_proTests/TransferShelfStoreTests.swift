@@ -59,4 +59,46 @@ final class TransferShelfStoreTests: XCTestCase {
         XCTAssertFalse(store.isValid(item, fileExists: { _ in false }))
         XCTAssertTrue(store.isValid(item, fileExists: { _ in true }))
     }
+
+    // MARK: - 失效自动清理（文件被移走/删除后应从中转站移除）
+
+    func test_purgeInvalid_removesOnlyMissingItems_andKeepsOrder() {
+        var store = TransferShelfStore()
+        store.add(url: URL(fileURLWithPath: "/tmp/a.txt"))
+        store.add(url: URL(fileURLWithPath: "/tmp/gone.txt"))
+        store.add(url: URL(fileURLWithPath: "/tmp/b.txt"))
+        store.add(url: URL(fileURLWithPath: "/tmp/also-gone.txt"))
+
+        let existing: Set<String> = ["/tmp/a.txt", "/tmp/b.txt"]
+        let removed = store.purgeInvalid(fileExists: { existing.contains($0.path) })
+
+        XCTAssertEqual(store.items.map(\.url.path), ["/tmp/a.txt", "/tmp/b.txt"],
+                       "只应保留文件仍存在的条目，且保持原有顺序")
+        XCTAssertEqual(removed.map(\.url.path), ["/tmp/gone.txt", "/tmp/also-gone.txt"],
+                       "应返回被移除的失效条目")
+    }
+
+    func test_purgeInvalid_allValid_removesNothing() {
+        var store = TransferShelfStore()
+        store.add(url: URL(fileURLWithPath: "/tmp/a.txt"))
+        let removed = store.purgeInvalid(fileExists: { _ in true })
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertEqual(store.items.count, 1)
+    }
+
+    func test_purgeInvalid_onEmptyStoreIsSafe() {
+        var store = TransferShelfStore()
+        let removed = store.purgeInvalid(fileExists: { _ in false })
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertTrue(store.items.isEmpty)
+    }
+
+    func test_purgeInvalid_removesAllWhenAllMissing() {
+        var store = TransferShelfStore()
+        store.add(url: URL(fileURLWithPath: "/tmp/gone1.txt"))
+        store.add(url: URL(fileURLWithPath: "/tmp/gone2.txt"))
+        let removed = store.purgeInvalid(fileExists: { _ in false })
+        XCTAssertEqual(removed.count, 2)
+        XCTAssertTrue(store.items.isEmpty)
+    }
 }

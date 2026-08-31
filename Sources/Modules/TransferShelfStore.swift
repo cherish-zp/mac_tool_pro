@@ -72,4 +72,21 @@ public struct TransferShelfStore {
     public func isValid(_ item: TransferItem, fileExists: (URL) -> Bool) -> Bool {
         fileExists(item.url)
     }
+
+    /// 移除所有文件已不存在（被移走/重命名/删除）的条目，返回被移除的条目（保持原顺序）。
+    /// 文件存在性通过 fileExists 注入，便于单测。
+    @discardableResult
+    public mutating func purgeInvalid(fileExists: (URL) -> Bool) -> [TransferItem] {
+        var kept: [TransferItem] = []
+        var removed: [TransferItem] = []
+        for item in items {
+            if fileExists(item.url) {
+                kept.append(item)
+            } else {
+                removed.append(item)
+            }
+        }
+        items = kept
+        return removed
+    }
 }
