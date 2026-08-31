@@ -7,7 +7,6 @@ final class TransferShelfPanelController: NSObject {
     static let shared = TransferShelfPanelController()
 
     private var panel: NSPanel?
-    private var shelfView: TransferShelfView!
     private var hotZonePanel: NSPanel?
     private var hotZoneView: TransferShelfHotZoneView!
     private var hideWorkItem: DispatchWorkItem?
@@ -15,13 +14,33 @@ final class TransferShelfPanelController: NSObject {
     /// 面板可见期间的失效巡检定时器：文件被移走/删除后自动移除条目。
     private var validityTimer: Timer?
 
-    private var store = TransferShelfStore() {
+    private var store: TransferShelfStore {
         didSet { persist() }
     }
+    // 持久化路径为存储属性:测试注入临时路径,避免污染真实的暂存库。
+    private let storageURL: URL
+    // internal 只读暴露,供面板显示同步的单元测试断言。
+    private(set) var shelfView: TransferShelfView!
 
     private override init() {
+        self.store = TransferShelfStore()
+        self.storageURL = Self.defaultStorageURL
         super.init()
         loadPersisted()
+    }
+
+    /// 测试注入点:显式给定 store 与持久化路径,跳过真实文件的加载。
+    init(store: TransferShelfStore, storageURL: URL) {
+        self.store = store
+        self.storageURL = storageURL
+        super.init()
+    }
+
+    private static var defaultStorageURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("mac_tool_pro", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("transfer_shelf.json")
     }
 
     // MARK: - 对外接口
@@ -31,6 +50,9 @@ final class TransferShelfPanelController: NSObject {
         purgeInvalidItems()
         let toastPanel = panel ?? makePanel()
         panel = toastPanel
+        // 面板可能刚重建(应用重启/自动隐藏后复用),必须与暂存库同步,
+        // 否则库内已有条目时面板仍显示空态占位。
+        shelfView.render(items: store.items)
         position(toastPanel)
         cancelScheduledHide()
 
@@ -263,13 +285,6 @@ final class TransferShelfPanelController: NSObject {
 
     // MARK: - 持久化
 
-    private var storageURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("mac_tool_pro", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("transfer_shelf.json")
-    }
-
     private func persist() {
         guard let data = store.encode() else { return }
         try? data.write(to: storageURL, options: .atomic)
@@ -288,9 +303,12 @@ final class TransferShelfPanelController: NSObject {
                 changed = true
             }
         }
-        guard changed, let toastPanel = panel else { return }
+        // 去重(拖入已暂存的同一文件)也要重新渲染:面板可能尚未显示库内
+        // 条目,静默返回会让用户以为拖入失败。
+        guard let toastPanel = panel else { return }
         shelfView.render(items: store.items)
         position(toastPanel)
+        guard changed else { return }
         cancelScheduledHide()
         if !isDragSessionActive {
             scheduleHide(after: 3.5)
