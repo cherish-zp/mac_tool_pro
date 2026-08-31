@@ -504,6 +504,10 @@ final class TransferShelfItemView: NSView {
     private let iconView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
     private let removeButton = NSButton()
+    // 单击 vs 拖出判定与「本次按住已开拖拽会话」标记;后者同时避免
+    // 连续 mouseDragged 重复开启多个拖拽会话。
+    private var clickGate = TransferShelfClickGate()
+    private var dragSessionActive = false
 
     init(item: TransferItem) {
         self.item = item
@@ -585,9 +589,11 @@ final class TransferShelfItemView: NSView {
         removeButton.contentTintColor = .tertiaryLabelColor
     }
 
-    /// 点击：在 Finder 中定位该文件。
+    /// 按下只记录手势起点,不在按下时立即执行单击动作:mouseDown 早于系统
+    /// 对「单击 vs 拖出」的判定,立即弹出 Finder 会抢走焦点、掐断把文件
+    /// 拖到目标目录的手势。单击动作推迟到 mouseUp(见 ClickGate)。
     override func mouseDown(with event: NSEvent) {
-        NSWorkspace.shared.activateFileViewerSelecting([item.url])
+        clickGate.press()
     }
 
     /// 拖动：把暂存文件拖出到 Finder/其他 App。
@@ -595,6 +601,12 @@ final class TransferShelfItemView: NSView {
     /// 文件已被移走/删除时不开启拖拽会话（无法落盘），直接从中转站移除该条目。
     override func mouseDragged(with event: NSEvent) {
         guard TransferShelfPanelController.shared.validateItemForDrag(id: item.id) else { return }
+        if !dragSessionActive {
+            dragSessionActive = true
+            clickGate.beginDrag()
+        } else {
+            return
+        }
         let pasteboardItem = NSPasteboardItem()
         pasteboardItem.setString(item.url.absoluteString, forType: .fileURL)
 
@@ -608,6 +620,13 @@ final class TransferShelfItemView: NSView {
             return [component]
         }
         beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    /// 松开时若未进入拖拽,按单击处理(在 Finder 中定位该文件)。
+    override func mouseUp(with event: NSEvent) {
+        dragSessionActive = false
+        guard clickGate.isClick else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }
 
     /// 右键菜单：Finder 显示 / 拷贝路径 / 移除。
