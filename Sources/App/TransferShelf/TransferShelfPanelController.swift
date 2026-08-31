@@ -394,6 +394,17 @@ final class TransferShelfView: NSView {
         scrollView.documentView = stackView
         addSubview(scrollView)
 
+        // documentView 必须钉到 clip 视图:stackView 关闭了 autoresizing 且
+        // 没有其他约束时 frame 恒为 0×0,渲染进来的条目全部不可见(拖入后
+        // 面板永远空白)。底部用 >=,内容超出可视高度时才出现滚动。
+        let clipView = scrollView.contentView
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: clipView.topAnchor),
+            stackView.bottomAnchor.constraint(greaterThanOrEqualTo: clipView.bottomAnchor),
+        ])
+
         let emptySymbol = NSImage(systemSymbolName: "tray.and.arrow.down",
                                   accessibilityDescription: "拖入文件暂存") ?? NSImage()
         emptySymbol.size = NSSize(width: 18, height: 18)
