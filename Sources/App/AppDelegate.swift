@@ -31,6 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(triggerScreenshot),
             name: NSNotification.Name("com.zp.mac-tool-pro.trigger-screenshot"), object: nil
         )
+        // 诊断用：导出 App 捕获与系统 screencapture 参照图，对照定位捕获侧色差
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(dumpCaptureReference),
+            name: NSNotification.Name("com.zp.mac-tool-pro.dump-capture"), object: nil
+        )
         setupMainMenu()
         setupGlobalKeyMonitor()
         rebuildMenu()
@@ -249,6 +254,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func triggerScreenshot() {
         // ScreenshotModule 内部用 ScreenshotSession 防止重复触发
         screenshotModule.perform()
+    }
+
+    /// 诊断：同一时刻分别用 App 捕获路径（CGDisplayCreateImage）与系统
+    /// /usr/sbin/screencapture（Cmd+Shift+4 同源，色调映射正确）导出全屏图到 /tmp，
+    /// 对照两者的上下带亮度即可判定纵向渐变是否来自 CGDisplayCreateImage。
+    @objc private func dumpCaptureReference() {
+        let service = ScreenCaptureService()
+        for (id, image, _) in service.captureAllDisplays() {
+            let rep = NSBitmapImageRep(cgImage: image)
+            if let data = rep.representation(using: .png, properties: [:]) {
+                let url = URL(fileURLWithPath: "/tmp/mtg_cap_\(id).png")
+                try? data.write(to: url)
+            }
+        }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        proc.arguments = ["-x", "/tmp/mtg_ref_1.png", "/tmp/mtg_ref_2.png"]
+        try? proc.run()
+        proc.waitUntilExit()
+        DiagLog.write("DumpCaptureReference done exit=\(proc.terminationStatus)")
     }
 
     @objc private func showHotkeyLog() {

@@ -277,7 +277,7 @@ final class ScreenshotCoordinator {
         if ptRadius > 0 {
             let scaleX = view.bounds.width > 0 ? CGFloat(cropped.width) / view.bounds.width : 1
             let pxRadius = ptRadius * scaleX
-            if let rounded = applyRoundedCorners(to: finalImage, radius: pxRadius) {
+            if let rounded = ScreenshotImagePipeline.applyRoundedCorners(to: finalImage, radius: pxRadius) {
                 finalImage = rounded
             }
         }
@@ -285,51 +285,12 @@ final class ScreenshotCoordinator {
         if canvasSettings.shadowEnabled {
             let scaleX = view.bounds.width > 0 ? CGFloat(cropped.width) / view.bounds.width : 1
             let pxRadius = CornerRounding.clampedRadius(view.cornerRadius, for: sel.size) * scaleX
-            if let bordered = applyShadowBorder(to: finalImage, cornerRadius: pxRadius,
-                                                opacity: canvasSettings.shadowOpacity) {
+            if let bordered = ScreenshotImagePipeline.applyShadowBorder(to: finalImage, cornerRadius: pxRadius,
+                                                                        opacity: canvasSettings.shadowOpacity) {
                 finalImage = bordered
             }
         }
         return finalImage
-    }
-
-    /// 在图片最外边缘描深色边线（阴影边框），不改变图片尺寸。
-    private func applyShadowBorder(to image: CGImage, cornerRadius: CGFloat,
-                                   opacity: CGFloat) -> CGImage? {
-        let w = image.width
-        let h = image.height
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil, width: w, height: h,
-                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
-        ctx.draw(image, in: bounds)
-        let borderRect = ShadowBorder.borderRect(imageSize: bounds.size)
-        ctx.setStrokeColor(ShadowBorder.borderColor(opacity: opacity))
-        ctx.setLineWidth(ShadowBorder.borderWidth)
-        let r = CornerRounding.clampedRadius(cornerRadius, for: bounds.size)
-        if r > 0 {
-            ctx.addPath(CGPath(roundedRect: borderRect, cornerWidth: r, cornerHeight: r, transform: nil))
-        } else {
-            ctx.addRect(borderRect)
-        }
-        ctx.strokePath()
-        return ctx.makeImage()
-    }
-
-    /// 将 CGImage 四角裁剪为圆角（透明），用于圆角截图输出。
-    private func applyRoundedCorners(to image: CGImage, radius: CGFloat) -> CGImage? {
-        let w = image.width
-        let h = image.height
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil, width: w, height: h,
-                                  bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        let bounds = CGRect(x: 0, y: 0, width: w, height: h)
-        ctx.addPath(CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil))
-        ctx.clip()
-        ctx.draw(image, in: bounds)
-        return ctx.makeImage()
     }
 
     private func compositeAnnotations(on cropped: CGImage, from overlay: ScreenshotOverlayWindow) -> CGImage? {
