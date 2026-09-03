@@ -53,6 +53,8 @@ targets:
       - path: Sources/Modules
       - path: Sources/App/Settings
       - path: Sources/App/TransferShelf
+      - path: Sources/App/Screenshot/PinWindow.swift
+      - path: Sources/App/Screenshot/PinContextMenu.swift
       - path: Sources/App/DiagLog.swift
     settings:
       base:

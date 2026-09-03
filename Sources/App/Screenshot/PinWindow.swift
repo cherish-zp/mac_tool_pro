@@ -42,10 +42,12 @@ final class PinWindow: NSWindow {
         container.addSubview(imageView)
         container.imageView = imageView
         NSLayoutConstraint.activate([
+            // 四边距约束：图片视图随窗口缩放（滚轮缩放窗口 frame 时同步），
+            // 边距恒定；若用固定宽高约束，缩放时图片锚死左上角、内容会到处滑动
             imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: margin),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -margin),
             imageView.topAnchor.constraint(equalTo: container.topAnchor, constant: margin),
-            imageView.widthAnchor.constraint(equalToConstant: displaySize.width),
-            imageView.heightAnchor.constraint(equalToConstant: displaySize.height),
+            imageView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -margin),
         ])
         contentView = container
 
