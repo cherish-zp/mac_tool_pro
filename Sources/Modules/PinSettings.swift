@@ -25,6 +25,11 @@ public enum PinIndicatorAppearance {
     /// 距顶部间距可调范围。
     public static let topInsetRange: ClosedRange<CGFloat> = 0...10
 
+    /// 呼吸最低不透明度：低于此值灯体会淡成"幻影弧线"（用户曾误认为显示缺陷）。
+    public static let breathMinOpacity: CGFloat = 0.45
+    /// 呼吸最高不透明度。
+    public static let breathMaxOpacity: CGFloat = 1.0
+
     public static func clamped(height: CGFloat) -> CGFloat {
         Swift.max(heightRange.lowerBound, Swift.min(heightRange.upperBound, height))
     }

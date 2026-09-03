@@ -288,11 +288,11 @@ final class PinIndicatorBar: NSView {
         }
     }
 
-    /// 渐亮（1.2s）→ 渐暗（1.2s）循环，缓入缓出。
+    /// 呼吸：最低 45% 亮度（永不淡成幻影线）→ 100%，缓入缓出。
     private func startBreathing() {
         let anim = CABasicAnimation(keyPath: "opacity")
-        anim.fromValue = 0.15
-        anim.toValue = 1.0
+        anim.fromValue = PinIndicatorAppearance.breathMinOpacity
+        anim.toValue = PinIndicatorAppearance.breathMaxOpacity
         anim.duration = 1.2
         anim.autoreverses = true
         anim.repeatCount = .infinity
@@ -310,6 +310,8 @@ final class PinIndicatorBar: NSView {
                                cornerHeight: silhouetteRadius, transform: nil))
             ctx.clip()
         }
+        // 灯体光晕：同色柔光让横条读作"发光的灯"而非一条淡线
+        ctx.setShadow(offset: .zero, blur: 3, color: color.withAlphaComponent(0.55).cgColor)
         // 胶囊形状（圆角 = 高度一半）
         let capsule = CGPath(roundedRect: bounds, cornerWidth: bounds.height / 2,
                              cornerHeight: bounds.height / 2, transform: nil)

@@ -40,4 +40,14 @@ final class PinIndicatorColorTests: XCTestCase {
         }
         XCTAssertEqual(Set(palette).count, palette.count, "色板颜色不得重复")
     }
+
+    // MARK: - 呼吸灯"灯感"参数（避免低透明度时淡成幻影线）
+
+    func test_breathOpacityRange_staysVisibleAtDimPhase() {
+        let min = PinIndicatorAppearance.breathMinOpacity
+        let max = PinIndicatorAppearance.breathMaxOpacity
+        XCTAssertGreaterThanOrEqual(min, 0.4, "呼吸最低亮度不得低于 0.4，否则淡得像残影弧线")
+        XCTAssertLessThanOrEqual(max, 1.0)
+        XCTAssertLessThan(min, max, "最低亮度必须低于最高亮度才有呼吸感")
+    }
 }
