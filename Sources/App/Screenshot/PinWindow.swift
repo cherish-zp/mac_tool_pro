@@ -2,6 +2,9 @@ import AppKit
 
 /// 贴图窗口：将截图钉在桌面上，始终置顶、可拖动、可关闭。
 /// 直接使用原始 CGImage 绘制，避免 NSImage 转换导致色差/模糊。
+/// 窗口四周留 shadowMargin 透明边距，图片视图用图层阴影投出柔和投影——
+/// 白底贴图浮在白色背景上时，系统默认阴影太弱、卡片轮廓消失，
+/// 边缘发丝线会被误读为内容里的杂线。
 /// 呼吸灯样式可配置（横条/圆点），横条的高度/距顶部间距/颜色均可在设置中调整，
 /// 设置变更立即生效。
 final class PinWindow: NSWindow {
@@ -12,7 +15,10 @@ final class PinWindow: NSWindow {
     private var styleObserver: NSObjectProtocol?
 
     init(cgImage: CGImage, displaySize: NSSize, at point: CGPoint, cornerRadius: CGFloat = 0) {
-        let frame = NSRect(x: point.x, y: point.y, width: displaySize.width, height: displaySize.height)
+        let margin = PinImageView.shadowMargin
+        let frame = NSRect(x: point.x - margin, y: point.y - margin,
+                           width: displaySize.width + margin * 2,
+                           height: displaySize.height + margin * 2)
         super.init(
             contentRect: frame,
             styleMask: [.borderless, .fullSizeContentView],
@@ -22,16 +28,26 @@ final class PinWindow: NSWindow {
         self.level = .floating
         self.isOpaque = false
         self.backgroundColor = .clear
-        self.hasShadow = true
         self.isMovable = true
+        self.hasShadow = false
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
+        let container = PinWindowContentView()
+        container.wantsLayer = true
         let imageView = PinImageView(frame: NSRect(origin: .zero, size: displaySize))
         imageView.cgImage = cgImage
         imageView.baseCornerRadius = cornerRadius
         imageView.setOriginalSize(displaySize)
-        imageView.autoresizingMask = [.width, .height]
-        contentView = imageView
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(imageView)
+        container.imageView = imageView
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: margin),
+            imageView.topAnchor.constraint(equalTo: container.topAnchor, constant: margin),
+            imageView.widthAnchor.constraint(equalToConstant: displaySize.width),
+            imageView.heightAnchor.constraint(equalToConstant: displaySize.height),
+        ])
+        contentView = container
 
         // 左上角关闭按钮
         let closeButton = PinCloseButton()
@@ -53,8 +69,8 @@ final class PinWindow: NSWindow {
         styleObserver = NotificationCenter.default.addObserver(
             forName: .pinIndicatorStyleDidChange, object: nil, queue: .main
         ) { [weak self] _ in
-            guard let self = self, let imageView = self.contentView as? PinImageView else { return }
-            imageView.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
+            guard let self = self, let imageView = self.contentView as? PinWindowContentView else { return }
+            imageView.imageView?.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
         }
 
         DiagLog.write("PinWindow: pts=\(displaySize) pixels=\(cgImage.width)x\(cgImage.height) backingScale=\(self.backingScaleFactor)")
@@ -73,9 +89,25 @@ final class PinWindow: NSWindow {
     }
 }
 
+/// 贴图窗口内容容器：窗口比图片大一圈（阴影边距），
+/// 边距区域不响应鼠标（hitTest 返回 nil，不挡贴图背后的点击目标）。
+final class PinWindowContentView: NSView {
+
+    weak var imageView: PinImageView?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let imageView = imageView else { return super.hitTest(point) }
+        let local = convert(point, from: nil)
+        return imageView.frame.contains(local) ? imageView : nil
+    }
+}
+
 /// 贴图视图：直接用 CGContext.draw 绘制原始 CGImage，与覆盖层渲染方式一致。
 /// 处理拖拽移动 + 双击关闭。管理呼吸灯样式（横条/圆点）与关闭按钮。
 final class PinImageView: NSView {
+
+    /// 窗口四周的透明阴影边距（点）。
+    static let shadowMargin: CGFloat = 20
 
     var cgImage: CGImage?
     /// 贴图基础圆角半径（点，未缩放时口径），用于呼吸灯贴合图片圆角；0 表示直角。
@@ -106,6 +138,18 @@ final class PinImageView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
     override var isFlipped: Bool { false }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        // 图层阴影投到窗口的透明边距里：跟随图片圆角轮廓，
+        // 让白底贴图在同色背景上有清晰的"悬浮卡片"边界
+        wantsLayer = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.30
+        layer?.shadowRadius = 14
+        layer?.shadowOffset = NSSize(width: 0, height: -4)
+        layer?.masksToBounds = false
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, let cg = cgImage else { return }
@@ -242,7 +286,11 @@ final class PinImageView: NSView {
         currentScale = PinScaler.clampedScaleFactor(currentScale * scaleDelta)
         guard let win = window, originalSize.width > 0 else { return }
         let newSize = PinScaler.scaledSize(original: originalSize, scaleFactor: currentScale)
-        let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: newSize)
+        // 窗口 frame 含四周阴影边距，缩放目标尺寸需补回边距并保持中心不变
+        let margin = PinImageView.shadowMargin
+        let windowSize = NSSize(width: newSize.width + margin * 2,
+                                height: newSize.height + margin * 2)
+        let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: windowSize)
         win.setFrame(newFrame, display: true)
         updateCloseButtonFrame()
         indicatorBar?.silhouetteRadius = baseCornerRadius * currentScale
