@@ -110,6 +110,19 @@ final class PinImageView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, let cg = cgImage else { return }
         ctx.draw(cg, in: bounds)
+        // 发丝描边：贴图圆角烘焙为透明像素，白底贴图放在白色背景上弧度不可见；
+        // 显示层描 1pt 边框（跟随贴图圆角、随缩放同步）让弧度在任何背景上可见。
+        // 仅显示层，不修改图片像素（复制/保存内容不变）。
+        let radius = CornerRounding.clampedRadius(baseCornerRadius * currentScale, for: bounds.size)
+        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.20).cgColor)
+        ctx.setLineWidth(1)
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        if radius > 0 {
+            ctx.addPath(CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        } else {
+            ctx.addRect(rect)
+        }
+        ctx.strokePath()
     }
 
     /// 按设置应用呼吸灯：样式（横条/圆点）+ 横条外观（高度/距顶部间距/颜色）。
