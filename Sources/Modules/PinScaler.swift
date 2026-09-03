@@ -28,6 +28,16 @@ public enum PinScaler {
                       height: newSize.height)
     }
 
+    /// 计算缩放后的 frame，保持锚点（frame 内坐标）在屏幕上的位置不动——
+    /// 滚轮缩放贴图时光标指哪、哪不动（图片查看器标准行为）。
+    public static func scaledFrame(originalFrame: CGRect, newSize: CGSize, anchorInFrame: CGPoint) -> CGRect {
+        let scaleX = originalFrame.width > 0 ? newSize.width / originalFrame.width : 1
+        let scaleY = originalFrame.height > 0 ? newSize.height / originalFrame.height : 1
+        let x = anchorInFrame.x - (anchorInFrame.x - originalFrame.minX) * scaleX
+        let y = anchorInFrame.y - (anchorInFrame.y - originalFrame.minY) * scaleY
+        return CGRect(origin: CGPoint(x: x, y: y), size: newSize)
+    }
+
     // MARK: - 关闭按钮等比例缩放
 
     /// 关闭按钮原始尺寸（点）。

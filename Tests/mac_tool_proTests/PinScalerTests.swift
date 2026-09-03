@@ -106,4 +106,30 @@ final class PinScalerTests: XCTestCase {
         XCTAssertEqual(frame.origin.y, bounds.height - 8 - 22, accuracy: 0.001)
     }
 
+    // MARK: - 光标锚定缩放
+
+    func test_scaledFrame_anchorPointStaysPut_whenScaling() {
+        // 原 frame (0,0,100,100)，锚点 (25,75)（frame 内坐标）；
+        // 放大到 200x200（2x）后，锚点处的内容点应仍在原屏幕位置 (25,75)：
+        // 新原点 + (锚点偏移 × 缩放比) == 原屏幕锚点位置
+        let frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let anchor = CGPoint(x: 25, y: 75)
+        let scale: CGFloat = 2
+        let result = PinScaler.scaledFrame(originalFrame: frame, newSize: CGSize(width: 200, height: 200),
+                                           anchorInFrame: anchor)
+        XCTAssertEqual(result.minX + (anchor.x - frame.minX) * scale, anchor.x, accuracy: 0.001,
+                       "锚点处的内容点水平位置应保持不变")
+        XCTAssertEqual(result.minY + (anchor.y - frame.minY) * scale, anchor.y, accuracy: 0.001,
+                       "锚点处的内容点垂直位置应保持不变")
+        XCTAssertEqual(result.width, 200, accuracy: 0.001)
+        XCTAssertEqual(result.height, 200, accuracy: 0.001)
+    }
+
+    func test_scaledFrame_anchorAtOrigin_keepsOrigin() {
+        let frame = CGRect(x: 100, y: 200, width: 100, height: 50)
+        let result = PinScaler.scaledFrame(originalFrame: frame, newSize: CGSize(width: 300, height: 150),
+                                           anchorInFrame: CGPoint(x: 100, y: 200))
+        XCTAssertEqual(result.minX, 100, accuracy: 0.001)
+        XCTAssertEqual(result.minY, 200, accuracy: 0.001)
+    }
 }

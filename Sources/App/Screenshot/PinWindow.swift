@@ -51,21 +51,16 @@ final class PinWindow: NSWindow {
         ])
         contentView = container
 
-        // 左上角关闭按钮
-        let closeButton = PinCloseButton()
-        closeButton.onTap = { [weak self] in self?.closePin() }
-        imageView.addCloseButton(closeButton)
-
-        // 呼吸灯样式与外观：读取设置（默认顶部横条，高 4pt、距顶 2pt、绿色）
-        imageView.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
-
-        // 右键菜单：复制图片（复制动作走注入的 Pasteboard 抽象；
-        // pointSize 取贴图原始点尺寸（未缩放），与工具条复制的逻辑尺寸口径一致）
+        // 右键菜单：复制图片 + 关闭贴图（关闭走右键，取代原左上角悬停 X 按钮）
         imageView.addContextMenu(PinContextMenu(
             pasteboard: SystemPasteboard(),
             imageProvider: { [weak imageView] in imageView?.cgImage },
-            pointSizeProvider: { [weak imageView] in imageView?.originalSize ?? .zero }
+            pointSizeProvider: { [weak imageView] in imageView?.originalSize ?? .zero },
+            closeHandler: { [weak self] in self?.closePin() }
         ))
+
+        // 呼吸灯样式与外观：读取设置（默认顶部横条，高 4pt、距顶 2pt、绿色）
+        imageView.applyIndicatorSettings(PinSettingsStore.defaultStore().load())
 
         // 设置变更立即生效于已打开的贴图
         styleObserver = NotificationCenter.default.addObserver(
@@ -116,7 +111,6 @@ final class PinImageView: NSView {
     var baseCornerRadius: CGFloat = 0
     private var closeButton: PinCloseButton?
     private var indicatorBar: PinIndicatorBar?
-    private var hoverTrackingArea: NSTrackingArea?
     /// 贴图原始点尺寸（创建时传入的 displaySize，未随滚轮缩放变化），
     /// 供右键复制携带与工具条一致的点尺寸口径。
     private(set) var originalSize: CGSize = .zero
@@ -172,10 +166,22 @@ final class PinImageView: NSView {
     }
 
     /// 按设置应用呼吸灯：样式（横条/圆点）+ 横条外观（高度/距顶部间距/颜色）。
+    /// topBar 模式不再创建悬停 X 关闭按钮（关闭已改由右键菜单承担）；
+    /// cornerDot 模式保留左上角圆点（闪烁指示，点击仍可关闭）。
     /// 可重复调用（初始化与设置变更通知共用）。
     func applyIndicatorSettings(_ settings: PinSettingsState) {
-        closeButton?.setMode(PinCloseButtonState.Mode(settings.indicatorStyle))
-        updateCloseButtonFrame()
+        if settings.indicatorStyle == .cornerDot {
+            if closeButton == nil {
+                let button = PinCloseButton()
+                button.onTap = { [weak self] in (self?.window as? PinWindow)?.closePin() }
+                addCloseButton(button)
+            }
+            closeButton?.setMode(.cornerDot)
+            updateCloseButtonFrame()
+        } else {
+            closeButton?.removeFromSuperview()
+            closeButton = nil
+        }
         if settings.indicatorStyle == .topBar {
             if indicatorBar == nil {
                 let bar = PinIndicatorBar()
@@ -224,27 +230,6 @@ final class PinImageView: NSView {
                            height: bar.barHeight)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let area = hoverTrackingArea { removeTrackingArea(area) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        closeButton?.setImageHovered(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        closeButton?.setImageHovered(false)
-    }
-
     override func mouseDown(with event: NSEvent) {
         // 点击关闭按钮时不触发拖拽
         let point = convert(event.locationInWindow, from: nil)
@@ -280,7 +265,7 @@ final class PinImageView: NSView {
         contextMenuController?.popUp(at: point, in: self)
     }
 
-    /// 滚轮缩放：上滚放大、下滚缩小，等比例缩放，保持窗口中心不变。
+    /// 滚轮缩放：上滚放大、下滚缩小，等比例缩放，光标锚定（指哪、哪不动）。
     override func scrollWheel(with event: NSEvent) {
         let delta = event.deltaY
         guard abs(delta) > 0.01 else { return }
@@ -288,11 +273,16 @@ final class PinImageView: NSView {
         currentScale = PinScaler.clampedScaleFactor(currentScale * scaleDelta)
         guard let win = window, originalSize.width > 0 else { return }
         let newSize = PinScaler.scaledSize(original: originalSize, scaleFactor: currentScale)
-        // 窗口 frame 含四周阴影边距，缩放目标尺寸需补回边距并保持中心不变
+        // 窗口 frame 含四周阴影边距，缩放目标尺寸需补回边距；
+        // 锚点 = 当前光标位置（屏幕坐标），保证光标下的画面缩放时不动
         let margin = PinImageView.shadowMargin
         let windowSize = NSSize(width: newSize.width + margin * 2,
                                 height: newSize.height + margin * 2)
-        let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: windowSize)
+        let mouse = NSEvent.mouseLocation
+        let anchor = window!.frame.contains(mouse) ? mouse
+            : CGPoint(x: window!.frame.midX, y: window!.frame.midY)
+        let newFrame = PinScaler.scaledFrame(originalFrame: win.frame, newSize: windowSize,
+                                             anchorInFrame: anchor)
         win.setFrame(newFrame, display: true)
         updateCloseButtonFrame()
         indicatorBar?.silhouetteRadius = baseCornerRadius * currentScale
