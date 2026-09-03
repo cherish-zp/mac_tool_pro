@@ -173,7 +173,6 @@ final class PinImageView: NSView {
         if settings.indicatorStyle == .cornerDot {
             if closeButton == nil {
                 let button = PinCloseButton()
-                button.onTap = { [weak self] in (self?.window as? PinWindow)?.closePin() }
                 addCloseButton(button)
             }
             closeButton?.setMode(.cornerDot)
@@ -370,7 +369,6 @@ final class PinIndicatorBar: NSView {
 /// 圆点模式：亮绿色闪烁，悬停变红并显示X；横条模式：悬停贴图时淡入红色X。
 final class PinCloseButton: NSView {
 
-    var onTap: (() -> Void)?
     private var state = PinCloseButtonState()
     private let buttonSize: CGFloat = 22
     private var blinkTimer: Timer?
@@ -434,35 +432,7 @@ final class PinCloseButton: NSView {
         blinkTimer = nil
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach { removeTrackingArea($0) }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        guard state.mode == .cornerDot else { return }
-        state.onHoverEnter()
-        needsDisplay = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        guard state.mode == .cornerDot else { return }
-        state.onHoverExit()
-        needsDisplay = true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        // 横条模式隐藏时不拦截点击（交给贴图拖拽）
-        if state.mode == .topBar && !state.isVisible { return }
-        onTap?()
-    }
+    // 圆点为纯闪烁指示灯：不悬停变色、不显示 X、点击不关闭（关闭统一走右键菜单）
 
     override func draw(_ dirtyRect: NSRect) {
         guard state.isVisible else { return }
