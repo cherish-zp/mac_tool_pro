@@ -55,3 +55,40 @@ final class CanvasSettingsTests: XCTestCase {
         XCTAssertEqual(toggled.shadowOpacity, 0.5, accuracy: 0.001)
     }
 }
+
+/// TDD: 画布设置跨会话持久化。
+/// 背景：用户在会话 A 选了圆角 32 贴图，会话 B 新截图预览却回到默认 16，
+/// "截图和贴图不一样"。画布设置必须持久化，会话开始时同步到覆盖层视图。
+final class CanvasSettingsStoreTests: XCTestCase {
+
+    private var defaults: UserDefaults!
+    private let suiteName = "test-canvas-settings-\(UUID().uuidString)"
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    func test_load_missingKey_returnsDefault() {
+        XCTAssertEqual(CanvasSettingsStore.load(defaults: defaults), CanvasSettings.default)
+    }
+
+    func test_saveLoad_roundtrip_customSettings() {
+        let custom = CanvasSettings(cornerRadius: 32, shadowEnabled: false, shadowOpacity: 0.4,
+                                    shadowBlur: 12, shadowOffset: CGSize(width: 2, height: -3))
+        CanvasSettingsStore.save(custom, defaults: defaults)
+        XCTAssertEqual(CanvasSettingsStore.load(defaults: defaults), custom)
+    }
+
+    func test_save_thenMutate_thenLoadAgain() {
+        CanvasSettingsStore.save(CanvasSettings(cornerRadius: 24), defaults: defaults)
+        XCTAssertEqual(CanvasSettingsStore.load(defaults: defaults).cornerRadius, 24, accuracy: 0.001)
+        CanvasSettingsStore.save(CanvasSettings(cornerRadius: 8), defaults: defaults)
+        XCTAssertEqual(CanvasSettingsStore.load(defaults: defaults).cornerRadius, 8, accuracy: 0.001)
+    }
+}

@@ -12,7 +12,11 @@ final class ScreenshotCoordinator {
     private let config = ScreenshotConfig()
     private var activeOverlay: ScreenshotOverlayWindow?
     private var selectionRect: CGRect?
-    private var canvasSettings = CanvasSettings.default
+    /// 画布设置：持久化到 UserDefaults，跨会话/跨重启保持用户所选（圆角/阴影），
+    /// 新截图会话开始时同步到覆盖层视图，避免"上次贴 32 这次变 16"的不一致
+    private var canvasSettings = CanvasSettingsStore.load() {
+        didSet { CanvasSettingsStore.save(canvasSettings) }
+    }
     private var ocrResultPanel: NSPanel?
     private var ocrTextView: NSTextView?
     private var escMonitor: Any?
@@ -203,9 +207,9 @@ final class ScreenshotCoordinator {
        window.overlayView!.isEditMode = true
         // 不自动选标注工具：默认光标模式，用户从工具条选择后才开始画标注
         window.overlayView!.currentTool = nil
-        // 默认圆角夹取到选区尺寸上限，同步工具条按钮状态
+        // 圆角用持久化的画布设置（跨会话一致），并夹取到选区尺寸上限，同步工具条按钮状态
         window.overlayView!.cornerRadius = CornerRounding.clampedRadius(
-            window.overlayView!.cornerRadius, for: rect.size)
+            canvasSettings.cornerRadius, for: rect.size)
         window.overlayView!.needsDisplay = true
         // 选区移动/缩放后同步协调器的 selectionRect，确保后续贴图/保存裁剪正确
        window.overlayView!.onSelectionChanged = { [weak self] newRect in

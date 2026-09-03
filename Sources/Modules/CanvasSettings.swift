@@ -1,8 +1,10 @@
 import CoreGraphics
+import Foundation
 
 /// 画布设置：圆角 + 阴影（开关、透明度、模糊半径、偏移）。
 /// 纯值类型，便于单测；渲染副作用由调用方处理。
-public struct CanvasSettings: Equatable {
+/// 跨会话持久化见 CanvasSettingsStore（App 重启、新截图会话均保持用户所选）。
+public struct CanvasSettings: Codable, Equatable {
 
     /// 圆角半径（点），0 = 直角。
     public var cornerRadius: CGFloat
@@ -62,5 +64,25 @@ public struct CanvasSettings: Equatable {
         let next = CornerRounding.nextRadius(cornerRadius)
         copy.cornerRadius = CornerRounding.clampedRadius(next, for: selectionSize)
         return copy
+    }
+}
+
+/// 画布设置持久化：UserDefaults 存取，跨会话保持用户所选的圆角/阴影。
+/// defaults 注入便于单测；缺失/损坏回退默认值。
+public struct CanvasSettingsStore {
+
+    static let storageKey = "canvasSettings"
+
+    public static func load(defaults: UserDefaults = .standard) -> CanvasSettings {
+        guard let data = defaults.data(forKey: storageKey),
+              let settings = try? JSONDecoder().decode(CanvasSettings.self, from: data) else {
+            return CanvasSettings.default
+        }
+        return settings
+    }
+
+    public static func save(_ settings: CanvasSettings, defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        defaults.set(data, forKey: storageKey)
     }
 }
