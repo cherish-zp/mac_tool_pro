@@ -162,8 +162,7 @@ final class ScreenshotCoordinator {
             for w in overlayWindows { w.orderOut(nil) }
             overlayWindows.removeAll()
         }
-        toolbar?.cleanupColorPanel()
-        toolbar?.closeCanvasPanel()
+        toolbar?.closeAllPanels()
         toolbar?.orderOut(nil)
         toolbar = nil
         activeOverlay = nil
@@ -385,8 +384,7 @@ final class ScreenshotCoordinator {
         cleanupScrollCapture()
         cancelIdleTimeout()
         for w in overlayWindows { w.orderOut(nil) }
-        toolbar?.cleanupColorPanel()
-        toolbar?.closeCanvasPanel()
+        toolbar?.closeAllPanels()
         toolbar?.orderOut(nil)
         overlayWindows.removeAll()
         toolbar = nil
@@ -582,8 +580,7 @@ func toolbarDidScroll() {
 
         // 隐藏所有自身 UI（悬停提示、工具条、覆盖层）
         toolbar?.hideTooltips()
-        toolbar?.cleanupColorPanel()
-        toolbar?.closeCanvasPanel()
+        toolbar?.closeAllPanels()
         toolbar?.orderOut(nil)
         for w in overlayWindows { w.orderOut(nil) }
 

@@ -25,6 +25,8 @@ final class ScreenshotToolbar: NSWindow {
     private var canvasButton: NSButton?
     private var canvasPanel: NSPanel?
     private var morePanel: NSPanel?
+    /// 子面板打开期间的点击外部关闭监控（本地+全局），全部关闭时移除
+    private var dismissMonitors: (local: Any?, global: Any?)?
     private var shadowToggleButton: NSButton?
     private var shadowSlider: NSSlider?
     private var shadowLabel: NSTextField?
@@ -68,6 +70,25 @@ final class ScreenshotToolbar: NSWindow {
         var x: CGFloat = 8
         let y: CGFloat = 10
         let btnSize: CGFloat = 28
+
+        // 圆角按钮（最左）：直接循环切换 0/8/16/24/32，按钮显示当前半径
+        let cornerBtn = NSButton(frame: NSRect(x: x, y: y, width: 36, height: btnSize))
+        cornerBtn.isBordered = false
+        cornerBtn.wantsLayer = true
+        cornerBtn.layer?.cornerRadius = 6
+        cornerBtn.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
+        cornerBtn.attributedTitle = NSAttributedString(string: "圆角", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
+        ])
+        cornerBtn.title = ""
+        cornerBtn.toolTip = "圆角：点击循环切换半径"
+        cornerBtn.target = self
+        cornerBtn.action = #selector(cornerTapped)
+        container.addSubview(cornerBtn)
+        container.registerTooltipButton(cornerBtn, text: "圆角")
+        cornerButton = cornerBtn
+        x += 36 + 4
 
         // 选择工具（无标注）
         x = addToolButton(container, x: x, y: y, size: btnSize, tool: nil, symbol: "cursorarrow")
@@ -296,6 +317,7 @@ final class ScreenshotToolbar: NSWindow {
         panel.orderFrontRegardless()
         colorPanel = panel
         updatePaletteSelection()
+        updateDismissMonitor()
     }
 
     @objc private func presetColorSelected(_ sender: NSButton) {
@@ -353,6 +375,7 @@ final class ScreenshotToolbar: NSWindow {
     func closeColorPanel() {
         colorPanel?.orderOut(nil)
         colorPanel = nil
+        updateDismissMonitor()
     }
 
     func cleanupColorPanel() {
@@ -360,6 +383,7 @@ final class ScreenshotToolbar: NSWindow {
         NotificationCenter.default.removeObserver(
             self, name: NSColorPanel.colorDidChangeNotification, object: NSColorPanel.shared)
         NSColorPanel.shared.close()
+        updateDismissMonitor()
     }
 
     /// 隐藏所有悬停提示窗口（截帧前调用，避免提示文字被截入画面）。
@@ -438,11 +462,54 @@ final class ScreenshotToolbar: NSWindow {
 
         panel.orderFrontRegardless()
         morePanel = panel
+        updateDismissMonitor()
     }
 
     func closeMorePanel() {
         morePanel?.orderOut(nil)
         morePanel = nil
+        updateDismissMonitor()
+    }
+
+    // MARK: - 子面板点击外部关闭
+
+    /// 当前打开的所有子面板。
+    private var openPanels: [NSPanel] { [morePanel, canvasPanel, colorPanel].compactMap { $0 } }
+
+    /// 任一子面板打开/关闭后同步监控状态：有面板时安装，全关时移除。
+    private func updateDismissMonitor() {
+        if openPanels.isEmpty {
+            if let local = dismissMonitors?.local { NSEvent.removeMonitor(local) }
+            if let global = dismissMonitors?.global { NSEvent.removeMonitor(global) }
+            dismissMonitors = nil
+        } else if dismissMonitors == nil {
+            let local = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                self?.handleOutsideClick()
+                return event  // 不吞事件，点击照常传递
+            }
+            let global = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+                self?.handleOutsideClick()
+            }
+            dismissMonitors = (local, global)
+        }
+    }
+
+    /// 点击位置不在任何子面板与工具条内 → 关闭全部子面板。
+    private func handleOutsideClick() {
+        let panels = openPanels
+        guard !panels.isEmpty else { return }
+        let frames = panels.map { $0.frame }
+        if PanelDismissal.shouldDismiss(click: NSEvent.mouseLocation, panelFrames: frames, toolbarFrame: frame) {
+            closeAllPanels()
+        }
+    }
+
+    /// 关闭全部子面板（更多/画布/颜色），截图会话结束时必须调用，
+    /// 防止面板在工具条窗口销毁后成为孤儿窗口残留屏幕。
+    func closeAllPanels() {
+        closeCanvasPanel()
+        closeMorePanel()
+        cleanupColorPanel()
     }
 
     @objc private func shadowToggled() {
@@ -506,9 +573,9 @@ final class ScreenshotToolbar: NSWindow {
 
     // MARK: - 画布子面板
 
-    /// 显示画布子面板（圆角 + 阴影控制）。
+    /// 显示画布子面板（阴影开关 + 透明度；圆角已移至工具条最左按钮）。
     private func showCanvasPanel() {
-        let panelWidth: CGFloat = 320
+        let panelWidth: CGFloat = 254
         let panelHeight: CGFloat = 44
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
                             styleMask: [.borderless, .nonactivatingPanel],
@@ -530,30 +597,8 @@ final class ScreenshotToolbar: NSWindow {
         card.layer?.borderColor = NSColor.black.withAlphaComponent(0.06).cgColor
         panel.contentView?.addSubview(card)
 
-        // 圆角按钮
-        let cb = NSButton(frame: NSRect(x: 8, y: 8, width: 50, height: 28))
-        cb.wantsLayer = true
-        cb.layer?.cornerRadius = 6
-        cb.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
-        cb.isBordered = false
-        cb.attributedTitle = NSAttributedString(string: "圆角", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor(calibratedWhite: 0.12, alpha: 1)
-        ])
-        cb.title = ""
-        cb.target = self
-        cb.action = #selector(cornerTapped)
-        card.addSubview(cb)
-        cornerButton = cb
-
-        // 分隔线
-        let sep = NSView(frame: NSRect(x: 64, y: 8, width: 1, height: 28))
-        sep.wantsLayer = true
-        sep.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
-        card.addSubview(sep)
-
         // 阴影开关按钮
-        let shBtn = NSButton(frame: NSRect(x: 72, y: 8, width: 50, height: 28))
+        let shBtn = NSButton(frame: NSRect(x: 8, y: 8, width: 50, height: 28))
         shBtn.wantsLayer = true
         shBtn.layer?.cornerRadius = 6
         shBtn.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.04).cgColor
@@ -573,12 +618,12 @@ final class ScreenshotToolbar: NSWindow {
         sLabel.font = .systemFont(ofSize: 11, weight: .medium)
         sLabel.textColor = NSColor(calibratedWhite: 0.12, alpha: 1)
         sLabel.alignment = .center
-        sLabel.frame = NSRect(x: 270, y: 14, width: 40, height: 16)
+        sLabel.frame = NSRect(x: 206, y: 14, width: 40, height: 16)
         card.addSubview(sLabel)
         shadowLabel = sLabel
 
         // 阴影透明度滑块
-        let slider = NSSlider(frame: NSRect(x: 130, y: 14, width: 135, height: 16))
+        let slider = NSSlider(frame: NSRect(x: 66, y: 14, width: 135, height: 16))
         slider.minValue = 0
         slider.maxValue = 1
         slider.doubleValue = 0.16
@@ -602,11 +647,13 @@ final class ScreenshotToolbar: NSWindow {
         panel.orderFrontRegardless()
         canvasPanel = panel
         updateCanvasShadowButton(enabled: true)
+        updateDismissMonitor()
     }
 
     func closeCanvasPanel() {
         canvasPanel?.orderOut(nil)
         canvasPanel = nil
+        updateDismissMonitor()
     }
 
     /// 更新阴影开关按钮状态。
